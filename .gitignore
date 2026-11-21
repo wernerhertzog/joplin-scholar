@@ -1,0 +1,6 @@
+node_modules/
+dist/
+publish/
+src/styles/styles.json
+.DS_Store
+*.log

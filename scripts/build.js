@@ -1,0 +1,26 @@
+'use strict';
+const esbuild = require('esbuild');
+const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
+const root = path.resolve(__dirname, '..');
+const dist = path.join(root, 'dist');
+const publish = path.join(root, 'publish');
+fs.mkdirSync(dist, { recursive: true });
+fs.mkdirSync(publish, { recursive: true });
+(async () => {
+  const stylesDir = path.join(root, 'src/styles');
+  const styles = Object.fromEntries(fs.readdirSync(stylesDir).filter(name => name.endsWith('.csl')).sort().map(name => [name.slice(0, -4), fs.readFileSync(path.join(stylesDir, name), 'utf8')]));
+  fs.writeFileSync(path.join(stylesDir, 'styles.json'), JSON.stringify(styles));
+  await esbuild.build({ entryPoints: [path.join(root, 'src/index.js')], bundle: true, platform: 'node', target: 'node18', outfile: path.join(dist, 'index.js') });
+  for (const name of ['worker', 'panel']) await esbuild.build({ entryPoints: [path.join(root, `src/${name}.js`)], bundle: true, platform: 'browser', format: 'iife', target: 'chrome120', outfile: path.join(dist, `${name}.js`) });
+  for (const name of ['manifest.json', 'panel.css']) fs.copyFileSync(path.join(root, 'src', name), path.join(dist, name));
+  fs.copyFileSync(path.join(root, 'LICENSE'), path.join(dist, 'LICENSE'));
+  fs.copyFileSync(path.join(root, 'node_modules/pdfjs-dist/LICENSE'), path.join(dist, 'PDFJS-LICENSE'));
+  fs.copyFileSync(path.join(root, 'node_modules/yaml/LICENSE'), path.join(dist, 'YAML-LICENSE'));
+  fs.copyFileSync(path.join(root, 'src/styles/LICENSE.txt'), path.join(dist, 'CSL-STYLES-LICENSE.txt'));
+  const archive = path.join(publish, 'joplin-scholar.jpl');
+  fs.rmSync(archive, { force: true });
+  execFileSync('tar', ['-cf', archive, 'index.js', 'manifest.json', 'panel.css', 'panel.js', 'worker.js', 'LICENSE', 'PDFJS-LICENSE', 'YAML-LICENSE', 'CSL-STYLES-LICENSE.txt'], { cwd: dist, env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  console.log(`Built ${archive}`);
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,0 +1,22 @@
+{
+  "name": "joplin-scholar",
+  "version": "0.10.1",
+  "private": true,
+  "description": "Live typeset preview and LaTeX export for Joplin",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "npm run build && node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "pdfjs-dist": "4.10.38",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright-core": "^1.57.0"
+  }
+}
