@@ -15,6 +15,7 @@ fs.mkdirSync(publish, { recursive: true });
   await esbuild.build({ entryPoints: [path.join(root, 'src/index.js')], bundle: true, platform: 'node', target: 'node18', outfile: path.join(dist, 'index.js') });
   for (const name of ['worker', 'panel']) await esbuild.build({ entryPoints: [path.join(root, `src/${name}.js`)], bundle: true, platform: 'browser', format: 'iife', target: 'chrome120', outfile: path.join(dist, `${name}.js`) });
   for (const name of ['manifest.json', 'panel.css']) fs.copyFileSync(path.join(root, 'src', name), path.join(dist, name));
+  fs.copyFileSync(path.join(root, 'src/manifest.json'), path.join(publish, 'joplin-scholar.json'));
   fs.copyFileSync(path.join(root, 'LICENSE'), path.join(dist, 'LICENSE'));
   fs.copyFileSync(path.join(root, 'node_modules/pdfjs-dist/LICENSE'), path.join(dist, 'PDFJS-LICENSE'));
   fs.copyFileSync(path.join(root, 'node_modules/yaml/LICENSE'), path.join(dist, 'YAML-LICENSE'));

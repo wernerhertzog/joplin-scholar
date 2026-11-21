@@ -7,7 +7,7 @@ Scholar supports abstracts; authors and affiliations; footnotes; captioned figur
 ## Install and set up
 
 1. Install Joplin Desktop 3.3 or later, [Pandoc](https://pandoc.org/installing.html), and a LaTeX distribution that supplies `xelatex` (such as MacTeX, TeX Live, or MiKTeX). You can set executable paths in **Settings → Joplin Scholar** if they are not found. On macOS Homebrew users can install Pandoc with `brew install pandoc`.
-2. Download `joplin-scholar.jpl` from the [latest GitHub release](https://github.com/wernerhertzog/joplin-scholar/releases/latest). In Joplin, open **Settings → Plugins → Plugin tools → Install from file** and select the downloaded file. Quit and restart Joplin.
+2. If Joplin Scholar is available in Joplin's plugin directory, search for it under **Settings → Plugins**, install it, and restart Joplin. Alternatively, download `joplin-scholar.jpl` from the [latest GitHub release](https://github.com/wernerhertzog/joplin-scholar/releases/latest), then use **Settings → Plugins → Plugin tools → Install from file**. Quit and restart Joplin.
 3. Select a note. Open or hide the panel with **View → Toggle Joplin Scholar**. Use **View → Change application layout** to move it next to your editor.
 4. Pause after editing for the preview to rebuild. Refresh forces a rebuild. Scroll normally to move through the paper. Hold Shift while scrolling to zoom, or use the minus and plus buttons; click the percentage to return to fit-to-width. The preview scales immediately and sharpens nearby pages in the background. You can select and copy the PDF's text directly from visible pages. Errors appear in the panel and the last successful preview for that note remains visible.
 
@@ -138,7 +138,7 @@ npm test
 npm run build
 ```
 
-The installable plugin is `publish/joplin-scholar.jpl`. The build generates `src/styles/styles.json` from the checked-in CSL files. Build outputs and dependencies are not committed.
+The installable plugin is `publish/joplin-scholar.jpl`, accompanied by `publish/joplin-scholar.json` for the Joplin plugin directory. The build generates `src/styles/styles.json` from the checked-in CSL files. Build outputs and dependencies are not committed.
 
 The default tests cover plugin behavior and use a simulated Pandoc. To also run the real Pandoc and PDF integration tests on macOS with MacTeX, set `SCHOLAR_TEST_PANDOC` to the Pandoc executable before running `npm test`; those tests currently expect XeLaTeX at `/Library/TeX/texbin/xelatex`. To run the optional browser preview test, set `SCHOLAR_TEST_BROWSER` to a compatible Chromium executable. Both sets of tests are skipped when their respective environment variables are absent.
 
