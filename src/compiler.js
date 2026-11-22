@@ -8,6 +8,8 @@ const run = promisify(execFile);
 const { latexAuthors, markdownAuthors, markdownMetadata, formatFootnotes } = require('./paper-data');
 const { exportBibliography } = require('./zotero');
 const { styles, styleId } = require('./citation-styles');
+const { hasBookdownEquations, transformEquations } = require('./equations');
+const MARKDOWN_FORMAT = 'markdown+tex_math_single_backslash';
 
 function citationKeys(document) {
   const keys = new Set();
@@ -22,15 +24,20 @@ function citationKeys(document) {
   return [...keys];
 }
 
-async function bibliographyFromZotero(dir, options) {
+async function readPandocDocument(dir, options) {
   let ast;
   try {
-    const result = await run(options.pandoc || 'pandoc', ['paper.md', '--from=markdown', '--to=json'], {cwd:dir, env:processEnvironment(), timeout:30000, maxBuffer:20 * 1024 * 1024});
+    const result = await run(options.pandoc || 'pandoc', ['paper.md', `--from=${MARKDOWN_FORMAT}`, '--to=json'], {cwd:dir, env:processEnvironment(), timeout:30000, maxBuffer:20 * 1024 * 1024});
     ast = JSON.parse(result.stdout);
   } catch (error) {
     if (error.code === 'ENOENT') throw new Error('Pandoc could not be found. Install Pandoc or set its full path in Joplin Scholar settings.');
-    throw new Error(`Could not read citations from the note. ${String(error.stderr || error.message).trim().slice(-3000)}`);
+    throw new Error(`Could not read the note. ${String(error.stderr || error.message).trim().slice(-3000)}`);
   }
+  return ast;
+}
+
+async function bibliographyFromZotero(dir, options, document = null) {
+  const ast = document || await readPandocDocument(dir, options);
   const keys = citationKeys(ast);
   if (keys.includes('*')) throw new Error('Listing every Zotero item with nocite: @* is not supported in direct mode. Use a bibliography file for this paper.');
   if (!keys.length) return '';
@@ -157,7 +164,12 @@ async function compile(note, data, options, format) {
     // Older graphicx releases do not recognize Pandoc's image alt key.
     // Define it only if absent; newer releases retain their accessibility support.
     await fs.writeFile(path.join(dir, 'scholar-compat.tex'), '\\usepackage{graphicx}\n\\makeatletter\n\\@ifundefined{KV@Gin@alt}{\\define@key{Gin}{alt}{}}{}\n\\makeatother\n');
-    const args = ['paper.md', '--from=markdown', '--standalone', '--include-in-header=scholar-compat.tex'];
+    let document = null;
+    if (hasBookdownEquations(note.body)) {
+      document = transformEquations(await readPandocDocument(dir, options));
+      await fs.writeFile(path.join(dir, 'paper.json'), JSON.stringify(document), 'utf8');
+    }
+    const args = [document ? 'paper.json' : 'paper.md', document ? '--from=json' : `--from=${MARKDOWN_FORMAT}`, '--standalone', '--include-in-header=scholar-compat.tex'];
     const metadata = markdownMetadata(note.body);
     if (!metadata || !metadata.title) args.push(`--metadata=title:${note.title || 'Untitled'}`);
     const inlineAuthors = markdownAuthors(note.body);
@@ -165,13 +177,16 @@ async function compile(note, data, options, format) {
     if (authors || inlineAuthors !== null) args.push('--variable', `author=${authors}`);
     const source = options.bibliographySource || 'auto';
     if (!['auto', 'zotero', 'file'].includes(source)) throw new Error('Select a valid bibliography source in Joplin Scholar settings.');
-    const metadataBibliography = source !== 'zotero' && !options.bibliography && !!metadata?.bibliography;
-    if (source === 'file' && !options.bibliography && !metadataBibliography) throw new Error('Choose a bibliography file in Joplin Scholar settings.');
-    const bibliography = source === 'zotero' || (source === 'auto' && !options.bibliography && !metadataBibliography)
-      ? await bibliographyFromZotero(dir, options) : options.bibliography;
+    // An explicitly empty bibliography together with inline CSL records is a
+    // self-contained paper. Do not consult a global file or a Zotero library.
+    const inlineOnly = Array.isArray(metadata?.bibliography) && !metadata.bibliography.length && Array.isArray(metadata?.references) && metadata.references.length > 0;
+    const metadataBibliography = !inlineOnly && source !== 'zotero' && !options.bibliography && !!metadata?.bibliography;
+    if (source === 'file' && !options.bibliography && !metadataBibliography && !inlineOnly) throw new Error('Choose a bibliography file in Joplin Scholar settings.');
+    const bibliography = inlineOnly ? '' : source === 'zotero' || (source === 'auto' && !options.bibliography && !metadataBibliography)
+      ? await bibliographyFromZotero(dir, options, document) : options.bibliography;
     if (bibliography) args.push('--citeproc', `--bibliography=${bibliography}`);
-    else if (metadataBibliography) args.push('--citeproc');
-    if (bibliography || metadataBibliography) {
+    else if (metadataBibliography || inlineOnly) args.push('--citeproc');
+    if (bibliography || metadataBibliography || inlineOnly) {
       // YAML takes precedence; built-in names are also accepted without a path.
       const selected = metadata?.csl || (options.citationStyle && options.citationStyle !== 'default' ? options.citationStyle : options.csl);
       if (selected && typeof selected !== 'string') throw new Error('The csl field must be a style name or CSL file path.');
@@ -213,4 +228,4 @@ async function exportResult(result, parent) {
     return path.join(dest, filename);
   } catch (error) { await fs.rm(dest, { recursive: true, force: true }); throw error; }
 }
-module.exports = { compile, clean, exportResult, safeName, stageNote, processEnvironment, expandTocMarkers, formatAbstract, citationKeys, bibliographyFromZotero };
+module.exports = { compile, clean, exportResult, safeName, stageNote, processEnvironment, expandTocMarkers, formatAbstract, citationKeys, bibliographyFromZotero, readPandocDocument };

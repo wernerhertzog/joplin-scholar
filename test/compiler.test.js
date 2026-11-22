@@ -88,6 +88,105 @@ test('reports missing Pandoc and removes temporary files', async () => {
   await assert.rejects(() => compile({ id: 'n', title: 'Test', body: 'Hello' }, {}, { pandoc: '/no/such/pandoc' }, 'pdf'), /Pandoc could not be found/);
 });
 
+test('renders alternative math delimiters and bookdown equation references', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const body = String.raw`\[toc\]
+
+# Introduction
+
+Equations \@ref(eq:linear) and \@ref(eq:squared). Inline \(x+1\), also $x+2$.
+
+\[
+a=b
+\]
+
+\begin{equation}
+y = a + bx (\#eq:linear)
+\end{equation}
+
+$$
+z = x^2 (\#eq:squared)
+$$
+
+Literal: ` + '`\\@ref(eq:missing)`' + String.raw`
+
+` + '```markdown\n\\@ref(eq:missing)\n(\\#eq:linear)\n```' + String.raw`
+
+<!-- \@ref(eq:missing) -->`;
+  const note = {id:'math', title:'Math paper', body};
+  const opts = {pandoc:process.env.SCHOLAR_TEST_PANDOC, engine:'/Library/TeX/texbin/xelatex'};
+  let tex, pdf;
+  try {
+    tex = await compile(note, {}, opts, 'tex');
+    const output = tex.output.toString();
+    for (const token of [String.raw`\tableofcontents`, String.raw`\eqref{eq:linear}`, String.raw`\eqref{eq:squared}`, String.raw`\label{eq:linear}`, String.raw`\label{eq:squared}`, String.raw`\(x+1\)`, String.raw`\(x+2\)`, String.raw`\[a=b\]`]) assert.ok(output.includes(token), `Missing ${token}`);
+    assert.equal((output.match(/\\label\{eq:linear\}/g) || []).length, 1);
+    pdf = await compile(note, {}, opts, 'pdf');
+    assert.equal(pdf.output.subarray(0, 5).toString(), '%PDF-');
+    const cp = require('node:child_process');
+    if (cp.spawnSync('python3', ['-c', 'import pypdf']).status === 0) {
+      const text = cp.execFileSync('python3', ['-c', 'import sys,pypdf; print("\\n".join(p.extract_text() for p in pypdf.PdfReader(sys.argv[1]).pages))', path.join(pdf.dir, 'paper.pdf')], {encoding:'utf8'});
+      assert.match(text, /Equations\s*\(\s*1\)\s*and\s*\(\s*2\)/);
+      assert.doesNotMatch(text, /\?\?/);
+    }
+  } finally { await clean(tex); await clean(pdf); }
+});
+
+test('reports missing, duplicate, and unnumbered equation labels', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const opts = {pandoc:process.env.SCHOLAR_TEST_PANDOC};
+  const note = body => ({id:'bad-math', title:'Math', body});
+  await assert.rejects(compile(note(String.raw`See \@ref(eq:missing).`), {}, opts, 'tex'), /Equation reference "eq:missing" has no matching label/);
+  await assert.rejects(compile(note(String.raw`See \@ref(eq:bad!).`), {}, opts, 'tex'), /Invalid equation label/);
+  await assert.rejects(compile(note(String.raw`$$a (\#eq:one)$$
+
+$$b (\#eq:one)$$`), {}, opts, 'tex'), /Duplicate equation label "eq:one"/);
+  await assert.rejects(compile(note(String.raw`\begin{equation*}
+a (\#eq:one)
+\end{equation*}`), {}, opts, 'tex'), /unnumbered environment/);
+});
+
+test('renders TeX math delimiters without equation references', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const note = {id:'delimiters', title:'Math', body:String.raw`Inline \(x+1\) and $x+2$.
+
+\[
+x^2=4
+\]`};
+  let tex;
+  try {
+    tex = await compile(note, {}, {pandoc:process.env.SCHOLAR_TEST_PANDOC}, 'tex');
+    for (const token of [String.raw`\(x+1\)`, String.raw`\(x+2\)`, String.raw`\[x^2=4\]`]) assert.ok(tex.output.toString().includes(token), `Missing ${token}`);
+  } finally { await clean(tex); }
+});
+
+test('the bundled paper renders with embedded references regardless of global bibliography settings', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const id = '1234567890abcdef1234567890abcdef';
+  const source = await fs.readFile(path.join(__dirname, '../examples/joplin-scholar-example.md'), 'utf8');
+  const note = {id:'example', title:'Example', body:source.replace('(example-workflow.png)', `(:/${id})`)};
+  const data = {resourcePath: async resourceId => { assert.equal(resourceId,id); return path.join(__dirname, '../examples/example-workflow.png'); }};
+  const base = {pandoc:process.env.SCHOLAR_TEST_PANDOC, engine:'/Library/TeX/texbin/xelatex', zoteroEndpoint:'http://127.0.0.1:1/unreachable'};
+  let pdf;
+  try {
+    for (const opts of [{bibliographySource:'zotero',bibliography:'/does/not/exist.bib'}, {bibliographySource:'file'}, {bibliographySource:'auto',bibliography:'/does/not/exist.bib'}]) {
+      let tex;
+      try {
+        tex = await compile(note, data, {...base,...opts,citationStyle:'ieee'}, 'tex');
+        const text = tex.output.toString();
+        for (const token of ['\\tableofcontents','\\listoffigures','\\listoftables','\\eqref{eq:mean}','\\label{eq:mean}','\\caption{A compact writing workflow','\\caption{A practical workflow','\\begin{CSLReferences}']) assert.ok(text.includes(token), `Missing ${token}`);
+        assert.match(text, /\[1\]/);
+        assert.doesNotMatch(text, /\[@(?:pandoc|joplin|zotero)\]/);
+        assert.ok(text.includes(`assets/${id}.png`));
+      } finally { await clean(tex); }
+    }
+    pdf = await compile(note, data, {...base,bibliographySource:'zotero'}, 'pdf');
+    assert.equal(pdf.output.subarray(0,5).toString(), '%PDF-');
+    const cp = require('node:child_process');
+    if (cp.spawnSync('python3', ['-c', 'import pypdf']).status === 0) {
+      const text = cp.execFileSync('python3', ['-c', 'import sys,pypdf; print("\\n".join(p.extract_text() for p in pypdf.PdfReader(sys.argv[1]).pages))', path.join(pdf.dir, 'paper.pdf')], {encoding:'utf8'});
+      assert.match(text, /Figure 1:/); assert.match(text, /Table 1:/);
+      assert.match(text, /Equation\s*\(\s*1\)/); assert.doesNotMatch(text, /\?\?/);
+    }
+  } finally { await clean(pdf); }
+});
+
 test('exports into separate folders without overwriting, preserving TeX assets', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scholar-test-'));
   try {
@@ -186,10 +285,11 @@ test('direct Zotero bibliography resolves only real citation keys', { skip: !pro
   const opts = {pandoc:process.env.SCHOLAR_TEST_PANDOC, engine:'/Library/TeX/texbin/xelatex', bibliographySource:'zotero', zoteroEndpoint:`http://127.0.0.1:${server.address().port}/better-bibtex/json-rpc`};
   let tex, pdf, plain, directMetadata;
   try {
-    const note = {id:'one', title:'Paper', body:'## Intro\n\nA claim [@smith2023, p. 42]. Another note[^more].\n\n[^more]: See [@doe2020].\n\n`[@not-a-citation]`\n\n## References'};
+    const note = {id:'one', title:'Paper', body:'## Intro\n\nA claim [@smith2023, p. 42]. Another note[^more]. See equation \\@ref(eq:result).\n\n$$x=1 (\\#eq:result)$$\n\n[^more]: See [@doe2020].\n\n`[@not-a-citation]`\n\n## References'};
     tex = await compile(note, {}, opts, 'tex');
     const output = tex.output.toString('utf8');
     assert.match(output, /Smith/); assert.match(output, /Doe/); assert.match(output, /First Study/);
+    assert.match(output, /\\eqref\{eq:result\}/);
     assert.deepEqual(new Set(calls[0].params[0]), new Set(['smith2023', 'doe2020']));
     assert.equal(calls[0].params[1], 'Better BibLaTeX');
     assert.ok(!JSON.stringify(calls[0]).includes('A claim'));

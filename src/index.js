@@ -5,6 +5,8 @@ const { STYLE_KEY, labels: styleLabels, styleId } = require('./citation-styles')
 const { tableMarkdown } = require('./insert-tools');
 const { copyCitation } = require('./zotero');
 const { openPdfSnapshot } = require('./open-pdf');
+const fs = require('fs/promises');
+const path = require('path');
 
 joplin.plugins.register({ onStart: async function() {
   await joplin.settings.registerSection('scholar', { label: 'Joplin Scholar', iconName: 'fas fa-graduation-cap' });
@@ -25,19 +27,21 @@ joplin.plugins.register({ onStart: async function() {
       <button id="refresh" type="button" title="Rebuild preview" aria-label="Rebuild preview">↻</button>
       <button id="open-pdf" type="button" title="Open the current preview in your default PDF viewer" disabled>Open PDF</button>
       <details class="export-menu" id="export-menu"><summary>Export</summary><div class="export-options"><button id="export-pdf" type="button">PDF</button><button id="export-tex" type="button">LaTeX</button></div></details>
+      <button id="create-example" type="button" title="Create an example paper in the selected notebook">Example paper</button>
       <span class="toolbar-separator" aria-hidden="true"></span>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="authors-panel">Authors</button>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="citation-panel">Cite</button>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="footnote-panel">Footnote</button>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="table-panel">Table</button>
     </header>
+    <p id="example-status" class="hint" role="status" aria-live="polite" hidden></p>
     <section class="paper-controls" id="authors-panel" aria-label="Authors and affiliations" hidden><div class="form-inner"><p class="hint">Saved with this note. Put each affiliation on a separate line. Markdown author metadata takes precedence.</p><div id="authors-list"></div><div class="actions"><button id="add-author" type="button">Add author</button><button id="save-authors" type="button" disabled>Save authors</button></div><p id="authors-status" class="hint" role="status">Select a note.</p></div></section>
     <section class="paper-controls" id="citation-panel" aria-label="Add a citation" hidden><div class="form-inner"><p class="hint">Open Zotero’s picker, then paste the citation into your note. Requires Zotero with Better BibTeX.</p><button id="pick-citation" type="button">Choose from Zotero</button><p id="citation-status" class="hint" role="status">Scholar can retrieve references directly from Zotero, or use a bibliography file.</p><code id="citation-result" class="citation-result" hidden></code></div></section>
     <section class="paper-controls" id="footnote-panel" aria-label="Add a footnote" hidden><div class="form-inner"><label for="footnote-text">Footnote text</label><textarea id="footnote-text" rows="2" placeholder="Type the footnote here"></textarea><button id="copy-footnote" type="button">Copy footnote</button><p id="footnote-status" class="hint" role="status">Paste it into the note where the number should appear. In Markdown you can also use [^1] and a matching [^1]: definition.</p></div></section>
     <section class="paper-controls" id="table-panel" aria-label="Create a table" hidden><div class="form-inner"><div class="dimensions"><label>Body rows <input id="table-rows" type="number" value="2" min="1" max="20"></label><label>Columns <input id="table-cols" type="number" value="2" min="1" max="10"></label><button id="table-resize" type="button">Set size</button></div><p class="hint">Fill in the header and cells, then copy and paste into the Markdown editor.</p><div id="table-grid" class="table-grid"></div><label>Caption <input id="table-caption" type="text" placeholder="Table caption"></label><button id="copy-table" type="button">Copy table</button><p id="table-status" class="hint" role="status"></p></div></section>
     <div class="status-row"><div class="style-control"><label for="citation-style">Citation style</label><select id="citation-style" aria-describedby="style-status" disabled><option value="default">Default / configured CSL</option>${Object.entries(styleLabels).map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div><p id="status" role="status" aria-live="polite">Select a note to begin.</p><div class="zoom" aria-label="Preview zoom"><button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button><button id="zoom-fit" type="button" title="Fit to width" aria-label="Fit to width">100%</button><button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button></div></div><p id="style-status" class="hint" role="status" hidden></p><details id="errors" hidden><summary>Show details</summary><pre id="error-text"></pre></details><div id="preview" tabindex="0" aria-label="PDF preview. Scroll to move through the paper; hold Shift and scroll to zoom." title="Scroll through the paper; hold Shift while scrolling to zoom"><div id="placeholder">Your typeset paper will appear here.</div></div></main>`);
   const send = message => joplin.views.panels.postMessage(panel, message);
-  let generation = 0, timer = null, compiling = false, requested = false, selectedId = null, lastPdf = null, webviewReady = false, authorLoadId = 0, authorView = null, choosingCitation = false, styleLoadId = 0;
+  let generation = 0, timer = null, compiling = false, requested = false, selectedId = null, lastPdf = null, webviewReady = false, authorLoadId = 0, authorView = null, choosingCitation = false, creatingExample = false, styleLoadId = 0;
   async function options() { const o = await joplin.settings.values(['pandoc', 'engine', 'bibliographySource', 'bibliography', 'zoteroLibrary', 'csl', 'template', 'delay']); for (const k of ['pandoc','engine','bibliographySource','bibliography','zoteroLibrary','csl','template']) o[k] = String(o[k] || '').trim(); return o; }
   async function authorsFor(noteId) { return normalizeAuthors((await joplin.data.userDataGet(1, noteId, AUTHOR_KEY)) || []); }
   async function styleFor(noteId) { const value = await joplin.data.userDataGet(1, noteId, STYLE_KEY); return styleId(value) || 'default'; }
@@ -118,9 +122,37 @@ joplin.plugins.register({ onStart: async function() {
       } finally { await clean(result); }
     } catch (error) { send({ type: 'error', message: error.message }); }
   }
+  async function createExample() {
+    if (creatingExample) return;
+    creatingExample = true;
+    send({type:'exampleCreating'});
+    let resource, note;
+    try {
+      const folder = await joplin.workspace.selectedFolder();
+      if (!folder?.id) throw new Error('Select a notebook first.');
+      const installDir = await joplin.plugins.installationDir();
+      const template = await fs.readFile(path.join(installDir, 'joplin-scholar-example.md'), 'utf8');
+      const marker = '(example-workflow.png)';
+      if (!template.includes(marker)) throw new Error('The bundled example is incomplete.');
+      resource = await joplin.data.post(['resources'], null, {title:'Joplin Scholar example workflow.png'}, [{path:path.join(installDir, 'example-workflow.png')}]);
+      if (!/^[a-f0-9]{32}$/i.test(resource?.id || '')) throw new Error('Could not create the example image.');
+      note = await joplin.data.post(['notes'], null, {parent_id:folder.id, title:'Writing a Paper with Joplin Scholar', body:template.replace(marker, `(:/${resource.id})`)});
+      if (!note?.id) throw new Error('Could not create the example note.');
+      try {
+        await joplin.commands.execute('openNote', note.id);
+        send({type:'exampleCreated', message:'Example paper created in the selected notebook.'});
+      } catch (error) {
+        send({type:'exampleCreated', message:'Example paper created in the selected notebook. Open it from the note list.'});
+      }
+    } catch (error) {
+      if (resource?.id && !note?.id) { try { await joplin.data.delete(['resources', resource.id]); } catch (_) {} }
+      send({type:'exampleError', message:`Could not create the example paper. ${error.message}`});
+    } finally { creatingExample = false; }
+  }
   await joplin.views.panels.onMessage(panel, async message => {
     if (!message || typeof message.type !== 'string') return;
     if (message.type === 'ready') { webviewReady = true; void loadAuthors(true); void loadStyle(); if (lastPdf) send({ type: 'pdf', ...lastPdf }); else schedule(true); }
+    if (message.type === 'createExample') await createExample();
     if (message.type === 'setStyle') {
       try {
         const note = await joplin.workspace.selectedNote();

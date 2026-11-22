@@ -13,6 +13,12 @@ Scholar supports abstracts; authors and affiliations; footnotes; captioned figur
 
 **Open PDF** opens a temporary snapshot of the current preview in the system's default PDF viewer. A snapshot does not update as you edit; open it again for a newer preview. Use **Export → PDF** or **Export → LaTeX** to save a permanent export. Scholar asks for a parent folder, then creates a new, uniquely named paper folder inside it. Each LaTeX export includes any Joplin image attachments it references in an `assets` folder. Compile the exported `.tex` from the folder containing the `.tex` file. Exports never overwrite an existing folder.
 
+## Try the example paper
+
+Select a notebook and click **Example paper** in the Scholar panel. Scholar creates and opens a new note in that notebook, with a real image attachment. The paper explains and demonstrates authors, an abstract, contents lists, figures and tables, math and equation references, footnotes, citations, bibliography styles, the preview, and export. Explore its Markdown beside the PDF preview, then edit your copy. Clicking the button again creates another independent copy; existing notes are never overwritten. The example is also available as [Markdown](examples/joplin-scholar-example.md), its [image](examples/example-workflow.png), and a [sample PDF](examples/joplin-scholar-example.pdf). When using the Markdown outside the button, import the image as a Joplin attachment and replace its relative image path with Joplin's attachment link.
+
+The example includes inline reference records and an explicit empty `bibliography: []` in its YAML. Together these tell Scholar to use the embedded references regardless of the global bibliography setting, so Zotero is not required for the example. A working Pandoc and LaTeX installation is still required for the PDF preview. For your own papers, remove or change the embedded reference records and `bibliography` field when switching to a Zotero library or bibliography file.
+
 ## Authors and affiliations
 
 Open **Authors** in the Scholar toolbar, add each author in order, and enter each affiliation on a separate line. Shared affiliations receive the same number in the PDF. Use the arrows to change author order, select at most one corresponding author, and enter that author's email if desired. Click **Save authors** to update the preview. The email is printed only for the corresponding author.
@@ -27,16 +33,16 @@ title: My paper
 author:
   - name: Alice Smith
     affiliations:
-      - University of Zurich
+      - Example University
       - Research Institute
     email: alice@example.org
     corresponding: true
   - name: Bob Jones
-    affiliation: University of Zurich
+    affiliation: Example University
 ---
 ```
 
-Both `author` and `authors` are accepted. A single author can be a string, or authors can be a list of strings or detailed records. R Markdown title footnotes work, for example `author: Jane Doe^[University of Zurich, jane@example.org]`. Detailed records also accept R Markdown's `url` and `affiliation_url` fields as links; when an author has multiple affiliations, `affiliation_url` applies to the first. An email is shown as the corresponding author's contact when `corresponding: true` is set. Title footnote contents are treated as plain text. The plugin reads these metadata fields; it does not run R or apply R Markdown's `output` setting. A frontmatter `title` is used for the paper title; otherwise Scholar uses the Joplin note title.
+Both `author` and `authors` are accepted. A single author can be a string, or authors can be a list of strings or detailed records. R Markdown title footnotes work, for example `author: Jane Doe^[Example University, jane@example.org]`. Detailed records also accept R Markdown's `url` and `affiliation_url` fields as links; when an author has multiple affiliations, `affiliation_url` applies to the first. An email is shown as the corresponding author's contact when `corresponding: true` is set. Title footnote contents are treated as plain text. The plugin reads these metadata fields; it does not run R or apply R Markdown's `output` setting. A frontmatter `title` is used for the paper title; otherwise Scholar uses the Joplin note title.
 
 When author metadata is present in Markdown, it takes precedence over the panel's separately saved author list. The panel displays the Markdown authors as read-only. Removing the Markdown author field restores the saved panel list. Edit YAML in the Markdown editor: switching to the rich-text editor may alter it.
 
@@ -67,6 +73,30 @@ This paper examines …
 ```
 
 Scholar converts the first such heading and the text after it into a LaTeX abstract, stopping at the next heading or a table-of-contents marker. Formatting, mathematics, and citations inside the abstract are processed normally. This affects Scholar's preview and exports; the note itself remains ordinary Joplin Markdown. Custom LaTeX templates must provide an `abstract` environment.
+
+## Mathematics and equation references
+
+Use dollar signs or TeX delimiters for inline and displayed mathematics:
+
+```markdown
+The energy is $E = mc^2$ or \(E = mc^2\).
+
+\[
+E = mc^2
+\]
+```
+
+For numbered equations and references, Scholar accepts bookdown-style labels and references in the Markdown editor:
+
+```markdown
+As shown in equation \@ref(eq:energy), mass and energy are related.
+
+\begin{equation}
+E = mc^2 (\#eq:energy)
+\end{equation}
+```
+
+The label may also appear inside a `$$ ... $$` display; Scholar numbers that display when a label is present. References become LaTeX `\eqref` commands, so the number is in parentheses and updates automatically. Each label must be unique and every reference must have a matching numbered equation; Scholar reports missing or duplicate labels in the preview. Code examples remain literal. The preview and PDF resolve references automatically; when compiling an exported `.tex` file, run LaTeX at least twice. The syntax is processed by Scholar and Pandoc without running R. Custom LaTeX templates need the `amsmath` package for `\eqref`. Joplin's rich-text editor may alter mathematical markup, so use its Markdown editor when writing equations. With TeX delimiters enabled, `\(` and `\[` start math rather than represent literal escaped punctuation.
 
 ## Table of contents
 

@@ -32,6 +32,9 @@ document.addEventListener('keydown', event => {
   if (open) { openTool(null); open.focus(); }
 });
 document.querySelector('#refresh').addEventListener('click', () => send({ type: 'refresh' }));
+const exampleButton = document.querySelector('#create-example');
+const exampleStatus = document.querySelector('#example-status');
+exampleButton.addEventListener('click', () => { exampleButton.disabled = true; exampleStatus.hidden = false; exampleStatus.textContent = 'Creating example paper…'; send({type:'createExample'}); });
 document.querySelector('#open-pdf').addEventListener('click', () => send({ type: 'openPdf' }));
 document.addEventListener('click', event => { if (exportMenu.open && !exportMenu.contains(event.target)) exportMenu.open = false; });
 document.querySelector('#export-pdf').addEventListener('click', () => { exportMenu.open = false; send({ type: 'export', format: 'pdf' }); });
@@ -150,8 +153,10 @@ new ResizeObserver(() => {
   } else pdf.schedule(0);
 }).observe(preview);
 webviewApi.onMessage(event => {
-  const message = event && event.message ? event.message : event;
+  const message = event && event.message && typeof event.message === 'object' ? event.message : event;
   if (!message || typeof message !== 'object') return;
+  if (message.type === 'exampleCreating') { exampleButton.disabled = true; exampleStatus.hidden = false; exampleStatus.textContent = 'Creating example paper…'; }
+  if (message.type === 'exampleCreated' || message.type === 'exampleError') { exampleButton.disabled = false; exampleStatus.hidden = false; exampleStatus.textContent = message.message; }
   if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; }
   if (message.type === 'style') {
     styleNoteId = message.noteId;

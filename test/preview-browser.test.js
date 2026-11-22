@@ -41,6 +41,12 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     await page.evaluate(() => { window.messages = []; window.webviewApi = {postMessage(message){window.messages.push(message);}, onMessage(fn){window.onPluginMessage = fn;}}; });
     await page.addScriptTag({content:fs.readFileSync(path.join(root, 'dist/worker.js'), 'utf8')});
     await page.addScriptTag({content:fs.readFileSync(path.join(root, 'dist/panel.js'), 'utf8')});
+    await page.getByRole('button', {name:'Example paper'}).click();
+    assert.ok(await page.evaluate(() => window.messages.some(message => message.type === 'createExample')));
+    assert.equal(await page.locator('#create-example').isDisabled(), true);
+    await page.evaluate(() => window.onPluginMessage({type:'exampleError', message:'Select a notebook first.'}));
+    assert.equal(await page.locator('#example-status').textContent(), 'Select a notebook first.');
+    assert.equal(await page.locator('#create-example').isEnabled(), true);
     const exportControl = page.locator('#export-menu summary');
     assert.equal(await page.locator('#export-pdf').isVisible(), false);
     await exportControl.click();

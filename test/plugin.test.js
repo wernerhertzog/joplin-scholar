@@ -83,3 +83,41 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     await fs.rm(root, {recursive:true,force:true});
   }
 });
+
+test('creates and opens an example note with its own attachment, and handles failures', async () => {
+  const sent = [], posts = [], deleted = [], opened = [], callbacks = {};
+  const resourceId = '1234567890abcdef1234567890abcdef';
+  let start, folder = {id:'notebook'}, failNote = false, failOpen = false;
+  global.joplin = {
+    plugins:{register:x=>{start=x.onStart;},installationDir:async()=>path.join(__dirname,'../dist')},
+    settings:{registerSection:async()=>{},registerSettings:async()=>{},onChange:async()=>{}},
+    views:{panels:{create:async()=> 'p',setHtml:async()=>{},addScript:async()=>{},postMessage:(_,m)=>sent.push(m),onMessage:async(_,fn)=>{callbacks.message=fn;}},menuItems:{create:async()=>{}}},
+    commands:{register:async()=>{},execute:async(command,id)=>{opened.push([command,id]); if(failOpen) throw Error('navigation unavailable');}},
+    data:{post:async(resource,_query,body,files)=>{
+      posts.push({resource,body,files});
+      if (resource[0] === 'resources') { assert.ok((await fs.stat(files[0].path)).size > 0); return {id:resourceId}; }
+      if (failNote) throw Error('storage unavailable');
+      return {id:'new-note'};
+    },delete:async resource=>deleted.push(resource)},
+    workspace:{selectedFolder:async()=>folder,onNoteChange:async()=>{},onNoteSelectionChange:async()=>{}},
+  };
+  try {
+    delete require.cache[require.resolve('../dist/index.js')]; require('../dist/index.js'); await start();
+    await callbacks.message({type:'createExample'});
+    const created=posts.find(p=>p.resource[0]==='notes');
+    assert.equal(created.body.parent_id,'notebook');
+    assert.match(created.body.body, new RegExp(`!\\[A compact writing workflow[^\\]]*\\]\\(:/${resourceId}\\)`));
+    assert.match(created.body.body, /bibliography: \[\]/);
+    assert.match(created.body.body, /\\@ref\(eq:mean\)/);
+    assert.deepEqual(opened[0],['openNote','new-note']);
+    assert.ok(sent.some(m=>m.type==='exampleCreated'));
+    folder=null; await callbacks.message({type:'createExample'});
+    assert.ok(sent.some(m=>m.type==='exampleError' && /Select a notebook/.test(m.message)));
+    folder={id:'notebook'}; failNote=true; await callbacks.message({type:'createExample'});
+    assert.deepEqual(deleted,[['resources',resourceId]]);
+    assert.ok(sent.some(m=>m.type==='exampleError' && /storage unavailable/.test(m.message)));
+    failNote=false; failOpen=true; await callbacks.message({type:'createExample'});
+    assert.ok(sent.some(m=>m.type==='exampleCreated' && /Open it from the note list/.test(m.message)));
+    assert.equal(deleted.length,1);
+  } finally { delete global.joplin; }
+});
