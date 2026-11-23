@@ -31,14 +31,16 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     process.env.SCHOLAR_TEST_OPEN_RECORD = recordFile;
   }
   let openedSnapshot;
-  let callbacks = {}, sent = [], note = { id: 'a', title: 'First', body: 'Text' }, start, clipboard = '', panelHtml = '';
+  let callbacks = {}, sent = [], note = { id: 'a', title: 'First', body: 'Text' }, start, clipboard = '', panelHtml = '', panelVisible = true;
+  const commands = {}, toolbarButtons = [], cssFiles = [];
   const authorData = new Map(), styleData = new Map(), documentStyleData = new Map();
   const storeFor = key => key.endsWith('citation-style') ? styleData : key.endsWith('document-style') ? documentStyleData : authorData;
   global.joplin = {
     plugins: { register: x => { start = x.onStart; }, installationDir:async()=>path.join(__dirname,'../dist') },
     settings: { registerSection: async()=>{}, registerSettings: async()=>{}, values: async()=>({ pandoc:fake, engine:'xelatex', delay:500 }), onChange: async fn=>{callbacks.settings=fn;} },
-    views: { panels: { create:async()=> 'p', setHtml:async(_,html)=>{panelHtml=html;}, addScript:async()=>{}, postMessage:(_,m)=>sent.push(m), onMessage:async(_,fn)=>{callbacks.message=fn;}, visible:async()=>true, show:async()=>{} }, menuItems: {create:async()=>{}}, dialogs: {showOpenDialog:async()=>[root]} },
-    commands: {register:async()=>{}}, data:{ userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
+    views: { panels: { create:async()=> 'p', setHtml:async(_,html)=>{panelHtml=html;}, addScript:async()=>{}, postMessage:(_,m)=>sent.push(m), onMessage:async(_,fn)=>{callbacks.message=fn;}, visible:async()=>panelVisible, show:async(_,value)=>{panelVisible=value;} }, menuItems: {create:async()=>{}}, toolbarButtons:{create:async(...args)=>toolbarButtons.push(args)}, dialogs: {showOpenDialog:async()=>[root]} },
+    window:{loadChromeCssFile:async file=>cssFiles.push(file)},
+    commands: {register:async command=>{commands[command.name]=command;}}, data:{ userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
     workspace:{ selectedNote:async()=>({...note}), onNoteChange:async fn=>{callbacks.change=fn;}, onNoteSelectionChange:async fn=>{callbacks.selection=fn;} },
   };
   try {
@@ -47,6 +49,14 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     assert.ok(panelHtml.indexOf('id="document-style"') < panelHtml.indexOf('id="citation-style"'));
     assert.match(panelHtml, /class="brand-icon" src="data:image\/png;base64,/);
     assert.doesNotMatch(panelHtml, /figure-panel/);
+    assert.deepEqual(toolbarButtons, [['toggleJoplinScholarToolbar', 'toggleJoplinScholar', 'noteToolbar']]);
+    assert.equal(commands.toggleJoplinScholar.label, 'Toggle Joplin Scholar');
+    assert.match(commands.toggleJoplinScholar.iconName, /scholar-toolbar-icon/);
+    assert.equal(cssFiles[0], path.join(__dirname,'../dist/toolbar.css'));
+    await commands.toggleJoplinScholar.execute();
+    assert.equal(panelVisible, false);
+    await commands.toggleJoplinScholar.execute();
+    assert.equal(panelVisible, true);
     await callbacks.message({type:'ready'});
     await delay(200);
     note = {id:'b',title:'Second',body:'Different'}; callbacks.selection();
@@ -58,6 +68,20 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
       openedSnapshot = await fs.readFile(recordFile, 'utf8');
       assert.equal(await fs.readFile(openedSnapshot, 'utf8'), '%PDF-FAKE');
       assert.ok(sent.some(message => message.type === 'pdfOpened'));
+      await callbacks.message({type:'detach'});
+      const detachedUrl = await fs.readFile(recordFile, 'utf8');
+      const stream = await fetch(detachedUrl + 'events');
+      assert.equal(stream.status, 200);
+      for (let i=0; i<30 && panelVisible; i++) await delay(50);
+      assert.equal(panelVisible, false);
+      const count = sent.filter(m=>m.type==='pdf').length;
+      callbacks.change();
+      for (let i=0; i<50 && sent.filter(m=>m.type==='pdf').length===count; i++) await delay(100);
+      assert.ok(sent.filter(m=>m.type==='pdf').length > count, 'edits compile while the main panel is hidden');
+      await fetch(detachedUrl+'return', {method:'POST', headers:{Origin:new URL(detachedUrl).origin}});
+      for (let i=0; i<30 && !panelVisible; i++) await delay(50);
+      assert.equal(panelVisible, true);
+      await stream.body.cancel();
     }
     await callbacks.message({type:'saveAuthors', noteId:'b', revision:1, authors:[{name:'Alice', affiliations:['UZH'], email:'alice@example.org', corresponding:true}]});
     assert.equal(authorData.get('b')[0].name, 'Alice');
@@ -82,7 +106,7 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     assert.match(clipboard, /Table: Results/);
     callbacks.change();
     for (let i=0; i<50 && sent.filter(m=>m.type==='pdf').length<2; i++) await delay(100);
-    assert.equal(sent.filter(m=>m.type==='pdf').length, 2);
+    assert.ok(sent.filter(m=>m.type==='pdf').length >= 2);
     await callbacks.message({ type:'export', format:'pdf' });
     assert.equal(await fs.readFile(path.join(root, 'Second', 'Second.pdf'), 'utf8'), '%PDF-FAKE');
     note.body = '---\nauthor: [Markdown Person]\n---\nBody';
@@ -114,7 +138,8 @@ test('creates and opens an example note with its own attachment, and handles fai
   global.joplin = {
     plugins:{register:x=>{start=x.onStart;},installationDir:async()=>path.join(__dirname,'../dist')},
     settings:{registerSection:async()=>{},registerSettings:async()=>{},onChange:async()=>{}},
-    views:{panels:{create:async()=> 'p',setHtml:async()=>{},addScript:async()=>{},postMessage:(_,m)=>sent.push(m),onMessage:async(_,fn)=>{callbacks.message=fn;}},menuItems:{create:async()=>{}}},
+    views:{panels:{create:async()=> 'p',setHtml:async()=>{},addScript:async()=>{},postMessage:(_,m)=>sent.push(m),onMessage:async(_,fn)=>{callbacks.message=fn;}},menuItems:{create:async()=>{}},toolbarButtons:{create:async()=>{}}},
+    window:{loadChromeCssFile:async()=>{}},
     commands:{register:async()=>{},execute:async(command,id)=>{opened.push([command,id]); if(failOpen) throw Error('navigation unavailable');}},
     data:{post:async(resource,_query,body,files)=>{
       posts.push({resource,body,files});

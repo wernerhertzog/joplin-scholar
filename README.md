@@ -10,10 +10,12 @@ Scholar supports abstracts; authors and affiliations; footnotes; captioned figur
 
 1. Install Joplin Desktop 3.3 or later, [Pandoc](https://pandoc.org/installing.html), and a LaTeX distribution that supplies `xelatex` (such as MacTeX, TeX Live, or MiKTeX). You can set executable paths in **Settings → Joplin Scholar** if they are not found. On macOS Homebrew users can install Pandoc with `brew install pandoc`.
 2. If Joplin Scholar is available in Joplin's plugin directory, search for it under **Settings → Plugins**, install it, and restart Joplin. Alternatively, download `joplin-scholar.jpl` from the [latest GitHub release](https://github.com/wernerhertzog/joplin-scholar/releases/latest), then use **Settings → Plugins → Plugin tools → Install from file**. Quit and restart Joplin.
-3. Select a note. Open or hide the panel with **View → Toggle Joplin Scholar**. Use **View → Change application layout** to move it next to your editor.
+3. Select a note. Use the **Toggle Joplin Scholar** logo button in the note toolbar to open or hide the panel. The same command is available through **View → Toggle Joplin Scholar**. Use **View → Change application layout** to move the panel next to your editor.
 4. Pause after editing for the preview to rebuild. Refresh forces a rebuild. Scroll normally to move through the paper. Hold Shift while scrolling to zoom, or use the minus and plus buttons; click the percentage to return to fit-to-width. The preview scales immediately and sharpens nearby pages in the background. You can select and copy the PDF's text directly from visible pages. Errors appear in the panel and the last successful preview for that note remains visible.
 
 **Open PDF** opens a temporary snapshot of the current preview in the system's default PDF viewer. A snapshot does not update as you edit; open it again for a newer preview. Use **Export → PDF** or **Export → LaTeX** to save a permanent export. Scholar asks for a parent folder, then creates a new, uniquely named paper folder inside it. Each LaTeX export includes any Joplin image attachments it references in an `assets` folder. Compile the exported `.tex` from the folder containing the `.tex` file. Exports never overwrite an existing folder.
+
+Click **Detach** and then **Open Scholar window** in your browser to move the live preview and its controls into a separate, resizable window, for example on another monitor. Allow pop-ups for the local page if your browser blocks it. The preview continues to update after you edit or switch notes in Joplin. Click **Return to Joplin**, or close the preview window, to restore the panel. The temporary connection stays on your computer and closes when the preview closes; the browser window uses its own default colours rather than Joplin's theme. The first browser tab can be closed after the preview window opens.
 
 ## Try the example paper
 
@@ -31,8 +33,29 @@ Choose **Document style** above the preview. The selection applies to the PDF pr
 | Double-spaced manuscript | Article, 12 pt, 1-inch margins, double spacing |
 | Compact article | Article, 10 pt, 0.75-inch margins, single spacing |
 | Report | Report class, 11 pt, 1-inch margins, 1.15 line spacing; top-level headings become chapters |
+| Standard book | `book`, 11 pt |
+| KOMA-Script book | `scrbook`, 11 pt |
+| KOMA-Script report | `scrreprt`, 11 pt |
+| Memoir book | `memoir`, 11 pt |
+| ClassicThesis | `scrbook` with the `classicthesis` package |
+| Tufte book | `tufte-book`, with Pandoc citation processing |
+| KOMA-Script article | `scrartcl`, 11 pt |
+| APA 7 manuscript | `apa7` manuscript mode |
+| Elsevier article | `elsarticle` preprint mode |
+| IEEE journal article | `IEEEtran` journal mode |
+| ACM manuscript | `acmart` manuscript mode, with publisher branding disabled |
+| REVTeX physics manuscript | `revtex4-2` APS preprint mode |
+| Springer Nature journal | `sn-jnl` basic journal style |
 
-These are general-purpose layouts, not journal submission templates. The **Citation style** dropdown controls citations independently. To customise a paper, add Pandoc YAML fields such as `documentclass`, `fontsize`, `geometry`, or `linestretch` to the note: explicit YAML fields take precedence over the corresponding preset values. If the note sets any individual margin field (such as `margin-left`), the preset's margins are omitted so Pandoc can apply the note's margin settings. A configured custom LaTeX template may ignore some of these fields.
+The publisher-style choices use the actual LaTeX classes and adapt Scholar's authors and abstract to their title-page commands. They are starting points for drafting, not a guarantee of submission compliance: journals and conferences may require additional metadata, country fields, class options, source files or a different bibliography workflow. For example, the ACM preview does not invent an author's country or conference details. Check the target venue's current instructions. **Citation style** remains a separate choice; selecting a publisher layout does not automatically select or enforce its citation rules.
+
+The book and report presets turn top-level Markdown headings into chapters. An Abstract heading is typeset as an unnumbered chapter where the book class has no abstract environment. ClassicThesis uses the actual package with Pandoc's fonts instead of requiring the template's own fonts; Tufte disables its letterspacing and built-in bibliography to support Scholar's authors and citations. These are drafting layouts, not complete university-specific thesis templates. They require the corresponding TeX packages to be installed; exported LaTeX also requires those packages.
+
+Install the corresponding class in your TeX distribution if it is missing. Springer Nature's `sn-jnl.cls` is not part of many TeX installations: download the [official journal article template](https://www.springernature.com/gp/authors/campaigns/latex-author-support), unzip it, and set **Springer Nature class file** in Scholar settings to the extracted `sn-jnl.cls`. Alternatively, install the class in your TeX search path. Scholar copies this class alongside an exported `.tex` so the export can compile independently of the original path. Springer Nature's class files remain subject to their own terms.
+
+IEEE journal mode uses two columns, while Pandoc's multipage tables require one column: Scholar places tables on full-width single-column pages, then resumes the two-column layout. Put IEEE tables outside lists and block quotes. Other classes use their own layouts and may move figures or tables according to LaTeX's normal float rules.
+
+To customise a paper, add Pandoc YAML fields such as `documentclass`, `classoption`, `fontsize`, `geometry`, or `linestretch` to the note: explicit YAML fields take precedence over the corresponding preset values. If the note sets any individual margin field (such as `margin-left`), the preset's margins are omitted so Pandoc can apply the note's margin settings. A different YAML `documentclass` bypasses the selected publisher adapter. A configured custom Pandoc LaTeX template takes precedence over Scholar's publisher adapters and may ignore selected layout settings; ensure that template supports the chosen class and author metadata.
 
 ## Authors and affiliations
 

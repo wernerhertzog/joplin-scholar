@@ -36,6 +36,18 @@ const exampleButton = document.querySelector('#create-example');
 const exampleStatus = document.querySelector('#example-status');
 exampleButton.addEventListener('click', () => { exampleButton.disabled = true; exampleStatus.hidden = false; exampleStatus.textContent = 'Creating example paper…'; send({type:'createExample'}); });
 document.querySelector('#open-pdf').addEventListener('click', () => send({ type: 'openPdf' }));
+const detachButton = document.querySelector('#detach-preview');
+if (window.scholarDetached) { detachButton.textContent = 'Return to Joplin'; detachButton.title = 'Close this window and restore the Scholar panel'; }
+window.addEventListener('beforeunload', event => { if (window.scholarDetached && authorDrafts.size) { event.preventDefault(); event.returnValue = ''; } });
+detachButton.addEventListener('click', () => {
+  if (authorDrafts.size) {
+    openTool(toolToggles.find(button => button.getAttribute('aria-controls') === 'authors-panel'));
+    authorsStatus.textContent = 'Save your author changes before moving the preview. If you edited another note, return to it and save those changes too.';
+    return;
+  }
+  if (window.scholarDetached) window.scholarReturn();
+  else send({type:'detach'});
+});
 document.addEventListener('click', event => { if (exportMenu.open && !exportMenu.contains(event.target)) exportMenu.open = false; });
 document.querySelector('#export-pdf').addEventListener('click', () => { exportMenu.open = false; send({ type: 'export', format: 'pdf' }); });
 document.querySelector('#export-tex').addEventListener('click', () => { exportMenu.open = false; send({ type: 'export', format: 'tex' }); });
@@ -169,6 +181,8 @@ webviewApi.onMessage(event => {
     const notices = [];
     if (message.value !== 'default' && message.overrides?.length) notices.push(`YAML overrides: ${message.overrides.join(', ')}.`);
     if (message.value !== 'default' && message.customTemplate) notices.push('The custom template may ignore these settings.');
+    if (message.value === 'springer') notices.push('Requires sn-jnl.cls installed in TeX or configured in Scholar settings.');
+    if (message.value === 'ieee') notices.push('Tables use full-width single-column pages.');
     documentStyleStatus.textContent = notices.join(' ');
     documentStyleStatus.hidden = !notices.length;
   }

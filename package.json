@@ -1,6 +1,6 @@
 {
   "name": "joplin-plugin-scholar",
-  "version": "0.14.0",
+  "version": "0.18.0",
   "description": "Live typeset preview and LaTeX export for Joplin",
   "author": "Werner Hertzog",
   "homepage": "https://github.com/wernerhertzog/joplin-scholar#readme",

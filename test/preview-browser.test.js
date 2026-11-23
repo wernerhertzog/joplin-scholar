@@ -29,7 +29,7 @@ function samplePdf(count) {
 test('PDF preview scales immediately, scrolls normally and renders nearby pages', {skip: !process.env.SCHOLAR_TEST_BROWSER}, async () => {
   const {chromium} = require('playwright-core');
   const root = path.join(__dirname, '..');
-  const template = fs.readFileSync(path.join(root, 'src/index.js'), 'utf8').match(/setHtml\(panel, `([\s\S]*?)`\);/)[1];
+  const template = fs.readFileSync(path.join(root, 'src/index.js'), 'utf8').match(/const panelHtml = `([\s\S]*?)`;/)[1];
   const html = new Function('styleLabels', 'documentStyles', 'logoData', 'return `' + template + '`')(require('../src/citation-styles').labels, require('../src/document-styles').documentStyles, fs.readFileSync(path.join(root, 'assets/icon-48.png')).toString('base64'));
   const browser = await chromium.launch({headless:true, executablePath:process.env.SCHOLAR_TEST_BROWSER});
   const page = await browser.newPage({viewport:{width:520, height:600}, deviceScaleFactor:2});
@@ -54,6 +54,10 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     await page.evaluate(() => window.onPluginMessage({type:'documentStyle', noteId:'n1', value:'manuscript', overrides:['fontsize'], customTemplate:true}));
     assert.match(await page.locator('#document-style-status').textContent(), /YAML overrides: fontsize/);
     assert.match(await page.locator('#document-style-status').textContent(), /custom template/);
+    await page.evaluate(() => window.onPluginMessage({type:'documentStyle', noteId:'n1', value:'springer', overrides:[], customTemplate:false}));
+    assert.match(await page.locator('#document-style-status').textContent(), /sn-jnl\.cls/);
+    await page.evaluate(() => window.onPluginMessage({type:'documentStyle', noteId:'n1', value:'ieee', overrides:[], customTemplate:false}));
+    assert.match(await page.locator('#document-style-status').textContent(), /single-column/);
     await page.evaluate(() => window.onPluginMessage({type:'paperChanged'}));
     assert.equal(await page.locator('#document-style').isDisabled(), true);
     const exportControl = page.locator('#export-menu summary');

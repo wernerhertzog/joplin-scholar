@@ -9,7 +9,8 @@ const { latexAuthors, markdownAuthors, markdownMetadata, formatFootnotes } = req
 const { exportBibliography } = require('./zotero');
 const { styles, styleId } = require('./citation-styles');
 const { hasBookdownEquations, transformEquations } = require('./equations');
-const { layoutDefaults } = require('./document-styles');
+const { layoutDefaults, documentStyles, documentStyleId } = require('./document-styles');
+const { authorCommands, extractAbstract, ieeeTables, publisherTemplate } = require('./publisher-styles');
 const { MAX_LIST_DEPTH, mayContainLists, maximumListDepth, deepListPreamble } = require('./nested-lists');
 const MARKDOWN_FORMAT = 'markdown+tex_math_single_backslash';
 
@@ -163,21 +164,41 @@ async function compile(note, data, options, format) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'joplin-scholar-'));
   try {
     await stageNote(note, data, dir);
+    const metadata = markdownMetadata(note.body);
+    const style = documentStyles[documentStyleId(options.documentStyle) || 'default'];
+    const classMatches = !metadata?.documentclass || metadata.documentclass === style.metadata.documentclass;
+    const adapter = classMatches && !options.template ? style.adapter : null;
+    if (style.adapter === 'springer' && classMatches) {
+      let classFile = options.springerClass;
+      if (!classFile) {
+        try { classFile = (await run('kpsewhich', ['sn-jnl.cls'], {env:processEnvironment(), timeout:10000})).stdout.trim(); } catch (_) {}
+      }
+      if (!classFile) throw new Error('Springer Nature needs sn-jnl.cls. Download the official journal template package and set the class file path in Joplin Scholar settings: https://www.springernature.com/gp/authors/campaigns/latex-author-support');
+      try { await fs.copyFile(classFile, path.join(dir, 'sn-jnl.cls')); }
+      catch (error) { throw new Error(`Could not read the Springer Nature class file: ${error.message}`); }
+    }
     // Older graphicx releases do not recognize Pandoc's image alt key.
     // Define it only if absent; newer releases retain their accessibility support.
     const equations = hasBookdownEquations(note.body);
     let parsed = null, document = null;
-    if (equations || mayContainLists(note.body)) parsed = await readPandocDocument(dir, options);
+    if (adapter || equations || mayContainLists(note.body)) parsed = await readPandocDocument(dir, options);
     const depth = parsed ? maximumListDepth(parsed.blocks || []) : 0;
     if (depth > MAX_LIST_DEPTH) throw new Error(`This note has ${depth} nested list or quote levels. Joplin Scholar supports up to ${MAX_LIST_DEPTH} levels.`);
     const compat = '\\usepackage{graphicx}\n\\makeatletter\n\\@ifundefined{KV@Gin@alt}{\\define@key{Gin}{alt}{}}{}\n\\makeatother\n';
-    await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + (depth > 4 ? deepListPreamble() : ''));
-    if (equations) {
-      document = transformEquations(parsed);
+    // Book classes do not necessarily define an abstract environment.
+    const bookAbstract = style.chapterStyle && classMatches ? '\\makeatletter\n\\@ifundefined{abstract}{\\newenvironment{abstract}{\\chapter*{Abstract}}{}}{}\n\\makeatother\n' : '';
+    const bookPreamble = classMatches && style.preamble === 'classicthesis' ? '\\providecolor{Maroon}{cmyk}{0,0.87,0.68,0.32}\n\\providecolor{RoyalBlue}{cmyk}{1,0.5,0,0}\n\\ifPDFTeX\\else\n\\let\\scholarSetMonoFont\\setmonofont\n\\renewcommand{\\setmonofont}[2][]{}\n\\fi\n\\usepackage[palatino=false,beramono=false]{classicthesis}\n\\ifPDFTeX\\else\\let\\setmonofont\\scholarSetMonoFont\\fi\n' : '';
+    await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + bookPreamble + bookAbstract + (depth > 4 ? deepListPreamble() : ''));
+    if (equations || adapter) {
+      document = equations ? transformEquations(parsed) : parsed;
+      if (adapter) extractAbstract(document);
+      const classOptions = metadata?.classoption ?? style.metadata.classoption ?? [];
+      const oneColumn = (Array.isArray(classOptions) ? classOptions : [classOptions]).includes('onecolumn');
+      if (adapter === 'ieee' && !oneColumn) ieeeTables(document);
       await fs.writeFile(path.join(dir, 'paper.json'), JSON.stringify(document), 'utf8');
     }
     const args = [document ? 'paper.json' : 'paper.md', document ? '--from=json' : `--from=${MARKDOWN_FORMAT}`, '--standalone', '--include-in-header=scholar-compat.tex'];
-    const metadata = markdownMetadata(note.body);
+    if (style.chapterStyle && classMatches) args.push('--top-level-division=chapter');
     const layout = layoutDefaults(options.documentStyle, metadata);
     if (Object.keys(layout).length) {
       await fs.writeFile(path.join(dir, 'scholar-layout.json'), JSON.stringify(layout), 'utf8');
@@ -186,8 +207,26 @@ async function compile(note, data, options, format) {
     }
     if (!metadata || !metadata.title) args.push(`--metadata=title:${note.title || 'Untitled'}`);
     const inlineAuthors = markdownAuthors(note.body);
-    const authors = latexAuthors(inlineAuthors === null ? (options.authors || []) : inlineAuthors);
+    const selectedAuthors = inlineAuthors === null ? (options.authors || []) : inlineAuthors;
+    const authors = latexAuthors(selectedAuthors);
     if (authors || inlineAuthors !== null) args.push('--variable', `author=${authors}`);
+    if (adapter) {
+      let base;
+      try { base = (await run(options.pandoc || 'pandoc', ['--print-default-template=latex'], {env:processEnvironment(), timeout:30000})).stdout; }
+      catch (error) { throw new Error(`Could not load Pandoc's LaTeX template: ${error.message}`); }
+      const template = publisherTemplate(base, adapter);
+      await fs.writeFile(path.join(dir, 'scholar-publisher.latex'), template, 'utf8');
+      if (adapter === 'revtex' && base.includes('$common.latex()$')) {
+        let common;
+        try { common = (await run(options.pandoc || 'pandoc', ['--print-default-data-file=templates/common.latex'], {env:processEnvironment(), timeout:30000})).stdout; }
+        catch (error) { throw new Error(`Could not load Pandoc's LaTeX support: ${error.message}`); }
+        common = common.replace(/\\usepackage\{caption\}\s*\n\\captionsetup\[table\]\{skip=6pt\}\s*\n/, '');
+        await fs.writeFile(path.join(dir, 'scholar-common.latex'), common, 'utf8');
+      }
+      args.push('--template=scholar-publisher.latex');
+      const commands = authorCommands(adapter, selectedAuthors);
+      if (commands) args.push('--variable', `scholar-authors=${commands}`);
+    }
     const source = options.bibliographySource || 'auto';
     if (!['auto', 'zotero', 'file'].includes(source)) throw new Error('Select a valid bibliography source in Joplin Scholar settings.');
     // An explicitly empty bibliography together with inline CSL records is a
@@ -218,6 +257,10 @@ async function compile(note, data, options, format) {
     } catch (error) {
       if (error.code === 'ENOENT') throw new Error('Pandoc could not be found. Install Pandoc or set its full path in Joplin Scholar settings.');
       const details = String(error.stderr || error.stdout || error.message).trim();
+      const missingClass = /File [`']([^`'\n]+\.cls)['`] not found/i.exec(details);
+      if (missingClass) throw new Error(`The LaTeX class ${missingClass[1]} is not installed. Install its TeX package in your LaTeX distribution. ${details.slice(-4000)}`);
+      const missingPackage = /File [`']([^`'\n]+\.sty)['`] not found/i.exec(details);
+      if (missingPackage) throw new Error(`The LaTeX package ${missingPackage[1]} is not installed. Install it in your TeX distribution. ${details.slice(-4000)}`);
       throw new Error(`Could not generate ${format.toUpperCase()}. ${details.slice(-6000)}`);
     }
     const output = await fs.readFile(path.join(dir, `paper.${format === 'pdf' ? 'pdf' : 'tex'}`));
@@ -237,6 +280,7 @@ async function exportResult(result, parent) {
     await fs.writeFile(path.join(dest, filename), result.output);
     if (result.format === 'tex') {
       try { await fs.cp(path.join(result.dir, 'assets'), path.join(dest, 'assets'), { recursive: true }); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      try { await fs.copyFile(path.join(result.dir, 'sn-jnl.cls'), path.join(dest, 'sn-jnl.cls')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
     return path.join(dest, filename);
   } catch (error) { await fs.rm(dest, { recursive: true, force: true }); throw error; }
