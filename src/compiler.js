@@ -9,6 +9,8 @@ const { latexAuthors, markdownAuthors, markdownMetadata, formatFootnotes } = req
 const { exportBibliography } = require('./zotero');
 const { styles, styleId } = require('./citation-styles');
 const { hasBookdownEquations, transformEquations } = require('./equations');
+const { layoutDefaults } = require('./document-styles');
+const { MAX_LIST_DEPTH, mayContainLists, maximumListDepth, deepListPreamble } = require('./nested-lists');
 const MARKDOWN_FORMAT = 'markdown+tex_math_single_backslash';
 
 function citationKeys(document) {
@@ -163,14 +165,25 @@ async function compile(note, data, options, format) {
     await stageNote(note, data, dir);
     // Older graphicx releases do not recognize Pandoc's image alt key.
     // Define it only if absent; newer releases retain their accessibility support.
-    await fs.writeFile(path.join(dir, 'scholar-compat.tex'), '\\usepackage{graphicx}\n\\makeatletter\n\\@ifundefined{KV@Gin@alt}{\\define@key{Gin}{alt}{}}{}\n\\makeatother\n');
-    let document = null;
-    if (hasBookdownEquations(note.body)) {
-      document = transformEquations(await readPandocDocument(dir, options));
+    const equations = hasBookdownEquations(note.body);
+    let parsed = null, document = null;
+    if (equations || mayContainLists(note.body)) parsed = await readPandocDocument(dir, options);
+    const depth = parsed ? maximumListDepth(parsed.blocks || []) : 0;
+    if (depth > MAX_LIST_DEPTH) throw new Error(`This note has ${depth} nested list or quote levels. Joplin Scholar supports up to ${MAX_LIST_DEPTH} levels.`);
+    const compat = '\\usepackage{graphicx}\n\\makeatletter\n\\@ifundefined{KV@Gin@alt}{\\define@key{Gin}{alt}{}}{}\n\\makeatother\n';
+    await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + (depth > 4 ? deepListPreamble() : ''));
+    if (equations) {
+      document = transformEquations(parsed);
       await fs.writeFile(path.join(dir, 'paper.json'), JSON.stringify(document), 'utf8');
     }
     const args = [document ? 'paper.json' : 'paper.md', document ? '--from=json' : `--from=${MARKDOWN_FORMAT}`, '--standalone', '--include-in-header=scholar-compat.tex'];
     const metadata = markdownMetadata(note.body);
+    const layout = layoutDefaults(options.documentStyle, metadata);
+    if (Object.keys(layout).length) {
+      await fs.writeFile(path.join(dir, 'scholar-layout.json'), JSON.stringify(layout), 'utf8');
+      // Input YAML overrides these defaults, including when the input is Pandoc JSON.
+      args.push('--metadata-file=scholar-layout.json');
+    }
     if (!metadata || !metadata.title) args.push(`--metadata=title:${note.title || 'Untitled'}`);
     const inlineAuthors = markdownAuthors(note.body);
     const authors = latexAuthors(inlineAuthors === null ? (options.authors || []) : inlineAuthors);
@@ -183,7 +196,7 @@ async function compile(note, data, options, format) {
     const metadataBibliography = !inlineOnly && source !== 'zotero' && !options.bibliography && !!metadata?.bibliography;
     if (source === 'file' && !options.bibliography && !metadataBibliography && !inlineOnly) throw new Error('Choose a bibliography file in Joplin Scholar settings.');
     const bibliography = inlineOnly ? '' : source === 'zotero' || (source === 'auto' && !options.bibliography && !metadataBibliography)
-      ? await bibliographyFromZotero(dir, options, document) : options.bibliography;
+      ? await bibliographyFromZotero(dir, options, document || parsed) : options.bibliography;
     if (bibliography) args.push('--citeproc', `--bibliography=${bibliography}`);
     else if (metadataBibliography || inlineOnly) args.push('--citeproc');
     if (bibliography || metadataBibliography || inlineOnly) {

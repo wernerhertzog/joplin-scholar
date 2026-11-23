@@ -2,6 +2,7 @@
 const { compile, clean, exportResult } = require('./compiler');
 const { AUTHOR_KEY, normalizeAuthors, markdownAuthors, markdownMetadata } = require('./paper-data');
 const { STYLE_KEY, labels: styleLabels, styleId } = require('./citation-styles');
+const { DOCUMENT_STYLE_KEY, documentStyles, documentStyleId, layoutOverrides } = require('./document-styles');
 const { tableMarkdown } = require('./insert-tools');
 const { copyCitation } = require('./zotero');
 const { openPdfSnapshot } = require('./open-pdf');
@@ -20,10 +21,12 @@ joplin.plugins.register({ onStart: async function() {
     template: { section: 'scholar', type: 2, value: '', public: true, label: 'Pandoc LaTeX template', description: 'Optional absolute path to a Pandoc-compatible LaTeX template.' },
     delay: { section: 'scholar', type: 1, value: 1800, public: true, label: 'Preview delay in milliseconds', description: 'Wait this long after editing before rebuilding the preview.' },
   });
+  let logoData = '';
+  try { logoData = (await fs.readFile(path.join(await joplin.plugins.installationDir(), 'assets/icon-48.png'))).toString('base64'); } catch (_) { /* Keep the panel usable if the optional icon is missing. */ }
   const panel = await joplin.views.panels.create('joplinScholar.preview');
   await joplin.views.panels.setHtml(panel, `<main class="app">
     <header class="toolbar" aria-label="Joplin Scholar controls">
-      <h1>Joplin Scholar</h1>
+      <h1>${logoData ? `<img class="brand-icon" src="data:image/png;base64,${logoData}" alt="" aria-hidden="true">` : ''}Joplin Scholar</h1>
       <button id="refresh" type="button" title="Rebuild preview" aria-label="Rebuild preview">↻</button>
       <button id="open-pdf" type="button" title="Open the current preview in your default PDF viewer" disabled>Open PDF</button>
       <details class="export-menu" id="export-menu"><summary>Export</summary><div class="export-options"><button id="export-pdf" type="button">PDF</button><button id="export-tex" type="button">LaTeX</button></div></details>
@@ -39,12 +42,24 @@ joplin.plugins.register({ onStart: async function() {
     <section class="paper-controls" id="citation-panel" aria-label="Add a citation" hidden><div class="form-inner"><p class="hint">Open Zotero’s picker, then paste the citation into your note. Requires Zotero with Better BibTeX.</p><button id="pick-citation" type="button">Choose from Zotero</button><p id="citation-status" class="hint" role="status">Scholar can retrieve references directly from Zotero, or use a bibliography file.</p><code id="citation-result" class="citation-result" hidden></code></div></section>
     <section class="paper-controls" id="footnote-panel" aria-label="Add a footnote" hidden><div class="form-inner"><label for="footnote-text">Footnote text</label><textarea id="footnote-text" rows="2" placeholder="Type the footnote here"></textarea><button id="copy-footnote" type="button">Copy footnote</button><p id="footnote-status" class="hint" role="status">Paste it into the note where the number should appear. In Markdown you can also use [^1] and a matching [^1]: definition.</p></div></section>
     <section class="paper-controls" id="table-panel" aria-label="Create a table" hidden><div class="form-inner"><div class="dimensions"><label>Body rows <input id="table-rows" type="number" value="2" min="1" max="20"></label><label>Columns <input id="table-cols" type="number" value="2" min="1" max="10"></label><button id="table-resize" type="button">Set size</button></div><p class="hint">Fill in the header and cells, then copy and paste into the Markdown editor.</p><div id="table-grid" class="table-grid"></div><label>Caption <input id="table-caption" type="text" placeholder="Table caption"></label><button id="copy-table" type="button">Copy table</button><p id="table-status" class="hint" role="status"></p></div></section>
-    <div class="status-row"><div class="style-control"><label for="citation-style">Citation style</label><select id="citation-style" aria-describedby="style-status" disabled><option value="default">Default / configured CSL</option>${Object.entries(styleLabels).map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div><p id="status" role="status" aria-live="polite">Select a note to begin.</p><div class="zoom" aria-label="Preview zoom"><button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button><button id="zoom-fit" type="button" title="Fit to width" aria-label="Fit to width">100%</button><button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button></div></div><p id="style-status" class="hint" role="status" hidden></p><details id="errors" hidden><summary>Show details</summary><pre id="error-text"></pre></details><div id="preview" tabindex="0" aria-label="PDF preview. Scroll to move through the paper; hold Shift and scroll to zoom." title="Scroll through the paper; hold Shift while scrolling to zoom"><div id="placeholder">Your typeset paper will appear here.</div></div></main>`);
+    <div class="status-row"><div class="style-control"><label for="document-style">Document style</label><select id="document-style" aria-describedby="document-style-status" disabled>${Object.entries(documentStyles).map(([id, style]) => `<option value="${id}">${style.label}</option>`).join('')}</select></div><div class="style-control"><label for="citation-style">Citation style</label><select id="citation-style" aria-describedby="style-status" disabled><option value="default">Default / configured CSL</option>${Object.entries(styleLabels).map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div><p id="status" role="status" aria-live="polite">Select a note to begin.</p><div class="zoom" aria-label="Preview zoom"><button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button><button id="zoom-fit" type="button" title="Fit to width" aria-label="Fit to width">100%</button><button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button></div></div><p id="document-style-status" class="hint" role="status" hidden></p><p id="style-status" class="hint" role="status" hidden></p><details id="errors" hidden><summary>Show details</summary><pre id="error-text"></pre></details><div id="preview" tabindex="0" aria-label="PDF preview. Scroll to move through the paper; hold Shift and scroll to zoom." title="Scroll through the paper; hold Shift while scrolling to zoom"><div id="placeholder">Your typeset paper will appear here.</div></div></main>`);
   const send = message => joplin.views.panels.postMessage(panel, message);
-  let generation = 0, timer = null, compiling = false, requested = false, selectedId = null, lastPdf = null, webviewReady = false, authorLoadId = 0, authorView = null, choosingCitation = false, creatingExample = false, styleLoadId = 0;
+  let generation = 0, timer = null, compiling = false, requested = false, selectedId = null, lastPdf = null, webviewReady = false, authorLoadId = 0, authorView = null, choosingCitation = false, creatingExample = false, styleLoadId = 0, documentStyleLoadId = 0;
   async function options() { const o = await joplin.settings.values(['pandoc', 'engine', 'bibliographySource', 'bibliography', 'zoteroLibrary', 'csl', 'template', 'delay']); for (const k of ['pandoc','engine','bibliographySource','bibliography','zoteroLibrary','csl','template']) o[k] = String(o[k] || '').trim(); return o; }
   async function authorsFor(noteId) { return normalizeAuthors((await joplin.data.userDataGet(1, noteId, AUTHOR_KEY)) || []); }
   async function styleFor(noteId) { const value = await joplin.data.userDataGet(1, noteId, STYLE_KEY); return styleId(value) || 'default'; }
+  async function documentStyleFor(noteId) { return documentStyleId(await joplin.data.userDataGet(1, noteId, DOCUMENT_STYLE_KEY)) || 'default'; }
+  async function loadDocumentStyle() {
+    const loadId = ++documentStyleLoadId;
+    try {
+      const note = await joplin.workspace.selectedNote();
+      const value = note ? await documentStyleFor(note.id) : 'default';
+      const metadata = note ? markdownMetadata(note.body) : null;
+      const settings = await joplin.settings.values(['template']);
+      if (loadId !== documentStyleLoadId || (await joplin.workspace.selectedNote())?.id !== note?.id) return;
+      send({type:'documentStyle', noteId:note?.id || null, value, overrides:layoutOverrides(metadata), customTemplate:!!String(settings.template || '').trim()});
+    } catch (error) { if (loadId === documentStyleLoadId) send({type:'documentStyleError', message:error.message}); }
+  }
   async function loadStyle() {
     const loadId = ++styleLoadId;
     try {
@@ -96,6 +111,7 @@ joplin.plugins.register({ onStart: async function() {
           const config = await options();
           config.authors = markdownAuthors(note.body) === null ? await authorsFor(note.id) : [];
           config.citationStyle = await styleFor(note.id);
+          config.documentStyle = await documentStyleFor(note.id);
           result = await compile(note, joplin.data, config, 'pdf');
           if (version === generation) { lastPdf = { base64: result.output.toString('base64'), title: note.title }; send({ type: 'pdf', ...lastPdf }); }
         } catch (error) {
@@ -116,6 +132,7 @@ joplin.plugins.register({ onStart: async function() {
         const config = await options();
         config.authors = markdownAuthors(note.body) === null ? await authorsFor(note.id) : [];
         config.citationStyle = await styleFor(note.id);
+        config.documentStyle = await documentStyleFor(note.id);
         result = await compile(note, joplin.data, config, format);
         const file = await exportResult(result, dirs[0]);
         send({ type: 'exported', file });
@@ -151,8 +168,19 @@ joplin.plugins.register({ onStart: async function() {
   }
   await joplin.views.panels.onMessage(panel, async message => {
     if (!message || typeof message.type !== 'string') return;
-    if (message.type === 'ready') { webviewReady = true; void loadAuthors(true); void loadStyle(); if (lastPdf) send({ type: 'pdf', ...lastPdf }); else schedule(true); }
+    if (message.type === 'ready') { webviewReady = true; void loadAuthors(true); void loadStyle(); void loadDocumentStyle(); if (lastPdf) send({ type: 'pdf', ...lastPdf }); else schedule(true); }
     if (message.type === 'createExample') await createExample();
+    if (message.type === 'setDocumentStyle') {
+      try {
+        const note = await joplin.workspace.selectedNote();
+        if (!note || note.id !== message.noteId) throw new Error('The selected note changed.');
+        const value = documentStyleId(message.value);
+        if (!value) throw new Error('Choose a valid document style.');
+        await joplin.data.userDataSet(1, note.id, DOCUMENT_STYLE_KEY, value);
+        await loadDocumentStyle();
+        if ((await joplin.workspace.selectedNote())?.id === note.id) schedule(true);
+      } catch (error) { await loadDocumentStyle(); send({type:'documentStyleError', message:error.message}); }
+    }
     if (message.type === 'setStyle') {
       try {
         const note = await joplin.workspace.selectedNote();
@@ -215,7 +243,7 @@ joplin.plugins.register({ onStart: async function() {
   await joplin.views.panels.addScript(panel, './panel.js');
   await joplin.commands.register({ name: 'toggleJoplinScholar', label: 'Toggle Joplin Scholar', execute: async () => { const visible = await joplin.views.panels.visible(panel); await joplin.views.panels.show(panel, !visible); if (!visible) schedule(true); } });
   await joplin.views.menuItems.create('toggleJoplinScholarMenu', 'toggleJoplinScholar', 'view');
-  await joplin.workspace.onNoteChange(() => { void loadAuthors(); void loadStyle(); schedule(); });
-  await joplin.workspace.onNoteSelectionChange(() => { authorView = null; send({type:'authorsLoading'}); send({type:'paperChanged'}); void loadAuthors(); void loadStyle(); schedule(true, true); });
-  await joplin.settings.onChange(() => schedule(true));
+  await joplin.workspace.onNoteChange(() => { void loadAuthors(); void loadStyle(); void loadDocumentStyle(); schedule(); });
+  await joplin.workspace.onNoteSelectionChange(() => { authorView = null; send({type:'authorsLoading'}); send({type:'paperChanged'}); void loadAuthors(); void loadStyle(); void loadDocumentStyle(); schedule(true, true); });
+  await joplin.settings.onChange(() => { void loadDocumentStyle(); schedule(true); });
 }});

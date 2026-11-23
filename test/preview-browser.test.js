@@ -30,7 +30,7 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
   const {chromium} = require('playwright-core');
   const root = path.join(__dirname, '..');
   const template = fs.readFileSync(path.join(root, 'src/index.js'), 'utf8').match(/setHtml\(panel, `([\s\S]*?)`\);/)[1];
-  const html = new Function('styleLabels', 'return `' + template + '`')(require('../src/citation-styles').labels);
+  const html = new Function('styleLabels', 'documentStyles', 'logoData', 'return `' + template + '`')(require('../src/citation-styles').labels, require('../src/document-styles').documentStyles, fs.readFileSync(path.join(root, 'assets/icon-48.png')).toString('base64'));
   const browser = await chromium.launch({headless:true, executablePath:process.env.SCHOLAR_TEST_BROWSER});
   const page = await browser.newPage({viewport:{width:520, height:600}, deviceScaleFactor:2});
   const errors = [];
@@ -38,6 +38,7 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
   try {
     await page.setContent(html);
     await page.addStyleTag({content:fs.readFileSync(path.join(root, 'src/panel.css'), 'utf8')});
+    assert.equal(await page.locator('.brand-icon').evaluate(image => image.naturalWidth), 48);
     await page.evaluate(() => { window.messages = []; window.webviewApi = {postMessage(message){window.messages.push(message);}, onMessage(fn){window.onPluginMessage = fn;}}; });
     await page.addScriptTag({content:fs.readFileSync(path.join(root, 'dist/worker.js'), 'utf8')});
     await page.addScriptTag({content:fs.readFileSync(path.join(root, 'dist/panel.js'), 'utf8')});
@@ -47,6 +48,14 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     await page.evaluate(() => window.onPluginMessage({type:'exampleError', message:'Select a notebook first.'}));
     assert.equal(await page.locator('#example-status').textContent(), 'Select a notebook first.');
     assert.equal(await page.locator('#create-example').isEnabled(), true);
+    await page.evaluate(() => window.onPluginMessage({type:'documentStyle', noteId:'n1', value:'default', overrides:[], customTemplate:false}));
+    await page.locator('#document-style').selectOption('manuscript');
+    assert.ok(await page.evaluate(() => window.messages.some(message => message.type === 'setDocumentStyle' && message.noteId === 'n1' && message.value === 'manuscript')));
+    await page.evaluate(() => window.onPluginMessage({type:'documentStyle', noteId:'n1', value:'manuscript', overrides:['fontsize'], customTemplate:true}));
+    assert.match(await page.locator('#document-style-status').textContent(), /YAML overrides: fontsize/);
+    assert.match(await page.locator('#document-style-status').textContent(), /custom template/);
+    await page.evaluate(() => window.onPluginMessage({type:'paperChanged'}));
+    assert.equal(await page.locator('#document-style').isDisabled(), true);
     const exportControl = page.locator('#export-menu summary');
     assert.equal(await page.locator('#export-pdf').isVisible(), false);
     await exportControl.click();

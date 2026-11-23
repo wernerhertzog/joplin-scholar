@@ -6,6 +6,18 @@ const os = require('node:os');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 
+test('packages the manifest icons used by the Joplin plugin directory', async () => {
+  const root=path.join(__dirname,'..');
+  const manifest=JSON.parse(await fs.readFile(path.join(root,'publish/joplin-scholar.json'),'utf8'));
+  const archive=require('node:child_process').execFileSync('tar',['-tf',path.join(root,'publish/joplin-scholar.jpl')],{encoding:'utf8'}).split('\n');
+  for (const size of [16,32,48,128]) {
+    const file=manifest.icons[String(size)];
+    assert.ok(archive.includes(file), `Missing ${file} from plugin archive`);
+    const png=await fs.readFile(path.join(root,'dist',file));
+    assert.equal(png.readUInt32BE(16),size); assert.equal(png.readUInt32BE(20),size);
+  }
+});
+
 test('plugin rebuilds on edits, avoids stale note previews, and exports the selected note', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scholar-plugin-'));
   const fake = path.join(root, 'pandoc');
@@ -20,17 +32,20 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
   }
   let openedSnapshot;
   let callbacks = {}, sent = [], note = { id: 'a', title: 'First', body: 'Text' }, start, clipboard = '', panelHtml = '';
-  const authorData = new Map(), styleData = new Map();
+  const authorData = new Map(), styleData = new Map(), documentStyleData = new Map();
+  const storeFor = key => key.endsWith('citation-style') ? styleData : key.endsWith('document-style') ? documentStyleData : authorData;
   global.joplin = {
-    plugins: { register: x => { start = x.onStart; } },
+    plugins: { register: x => { start = x.onStart; }, installationDir:async()=>path.join(__dirname,'../dist') },
     settings: { registerSection: async()=>{}, registerSettings: async()=>{}, values: async()=>({ pandoc:fake, engine:'xelatex', delay:500 }), onChange: async fn=>{callbacks.settings=fn;} },
     views: { panels: { create:async()=> 'p', setHtml:async(_,html)=>{panelHtml=html;}, addScript:async()=>{}, postMessage:(_,m)=>sent.push(m), onMessage:async(_,fn)=>{callbacks.message=fn;}, visible:async()=>true, show:async()=>{} }, menuItems: {create:async()=>{}}, dialogs: {showOpenDialog:async()=>[root]} },
-    commands: {register:async()=>{}}, data:{ userDataGet:async(_t,id,key)=>(key.endsWith('citation-style') ? styleData : authorData).get(id), userDataSet:async(_t,id,key,value)=>(key.endsWith('citation-style') ? styleData : authorData).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
+    commands: {register:async()=>{}}, data:{ userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
     workspace:{ selectedNote:async()=>({...note}), onNoteChange:async fn=>{callbacks.change=fn;}, onNoteSelectionChange:async fn=>{callbacks.selection=fn;} },
   };
   try {
     delete require.cache[require.resolve('../dist/index.js')]; require('../dist/index.js'); await start();
     assert.ok(panelHtml.indexOf('id="citation-style"') > panelHtml.indexOf('class="status-row"'));
+    assert.ok(panelHtml.indexOf('id="document-style"') < panelHtml.indexOf('id="citation-style"'));
+    assert.match(panelHtml, /class="brand-icon" src="data:image\/png;base64,/);
     assert.doesNotMatch(panelHtml, /figure-panel/);
     await callbacks.message({type:'ready'});
     await delay(200);
@@ -55,6 +70,14 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     assert.equal(styleData.get('b'), 'apa');
     await callbacks.message({type:'setStyle', noteId:'a', value:'ieee'});
     assert.equal(styleData.has('a'), false);
+    await callbacks.message({type:'setDocumentStyle', noteId:'b', value:'manuscript'});
+    assert.equal(documentStyleData.get('b'), 'manuscript');
+    await callbacks.message({type:'setDocumentStyle', noteId:'a', value:'compact'});
+    assert.equal(documentStyleData.has('a'), false);
+    await callbacks.message({type:'setDocumentStyle', noteId:'b', value:'invalid'});
+    assert.equal(documentStyleData.get('b'), 'manuscript');
+    assert.ok(sent.some(m=>m.type==='documentStyleError'));
+    assert.ok(sent.some(m=>m.type==='documentStyle' && m.noteId==='b' && m.value==='manuscript'));
     await callbacks.message({type:'copyTable', rows:[['Name','Value'],['A','10']], caption:'Results'});
     assert.match(clipboard, /Table: Results/);
     callbacks.change();

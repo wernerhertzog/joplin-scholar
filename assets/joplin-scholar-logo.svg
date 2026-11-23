@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Joplin Scholar: an open book beneath a graduation cap</title>
+  <rect width="512" height="512" rx="105" fill="#1265bd"/>
+  <path fill="#fff" d="M104 153 256 92l152 61-152 61z"/>
+  <path fill="#fff" d="M166 183v40c25 15 57 23 90 23s65-8 90-23v-40l-90 36z"/>
+  <path fill="#fff" d="M84 269c55-19 113-16 164 10v135c-52-25-109-28-164-9z"/>
+  <path fill="#fff" d="M428 269c-55-19-113-16-164 10v135c52-25 109-28 164-9z"/>
+</svg>

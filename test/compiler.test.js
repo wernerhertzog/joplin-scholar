@@ -88,6 +88,48 @@ test('reports missing Pandoc and removes temporary files', async () => {
   await assert.rejects(() => compile({ id: 'n', title: 'Test', body: 'Hello' }, {}, { pandoc: '/no/such/pandoc' }, 'pdf'), /Pandoc could not be found/);
 });
 
+test('supports deeply nested bullet, numbered, and mixed lists in PDF and standalone LaTeX', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const opts = {pandoc:process.env.SCHOLAR_TEST_PANDOC, engine:'/Library/TeX/texbin/xelatex'};
+  const makeBody = kind => Array.from({length:9}, (_,i) => '    '.repeat(i) + (kind === 'numbered' || (kind === 'mixed' && i % 2) ? '1. ' : '- ') + `Level ${i+1}`).join('\n');
+  for (const kind of ['bullet', 'numbered', 'mixed']) {
+    let pdf, tex;
+    try {
+      const note = {id:kind,title:'Nested lists',body:makeBody(kind)};
+      tex = await compile(note, {}, opts, 'tex');
+      assert.match(tex.output.toString(), /\\setlistdepth\{20\}/);
+      assert.match(tex.output.toString(), /\\usepackage\{enumitem\}/);
+      pdf = await compile(note, {}, opts, 'pdf');
+      assert.equal(pdf.output.subarray(0,5).toString(), '%PDF-');
+      const cp = require('node:child_process');
+      if (cp.spawnSync('python3', ['-c', 'import pypdf']).status === 0) {
+        const text = cp.execFileSync('python3', ['-c', 'import sys,pypdf; print("\\n".join(p.extract_text() for p in pypdf.PdfReader(sys.argv[1]).pages))', path.join(pdf.dir, 'paper.pdf')], {encoding:'utf8'});
+        for (let i=1; i<=9; i++) assert.match(text, new RegExp(`Level ${i}(?![0-9])`));
+        if (kind === 'numbered') assert.match(text, /1\. Level 9/);
+      }
+      if (kind === 'mixed') {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scholar-list-export-'));
+        try {
+          const file = await exportResult(tex, root);
+          cp.execFileSync(opts.engine, ['-interaction=nonstopmode','-halt-on-error',path.basename(file)], {cwd:path.dirname(file),stdio:'ignore'});
+          assert.ok((await fs.stat(path.join(path.dirname(file), 'Nested lists.pdf'))).size > 0);
+        } finally { await fs.rm(root, {recursive:true,force:true}); }
+      }
+    } finally { await clean(pdf); await clean(tex); }
+  }
+});
+
+test('keeps ordinary lists unchanged and reports the deep-list limit', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const opts={pandoc:process.env.SCHOLAR_TEST_PANDOC};
+  const note=body=>({id:'outline',title:'Outline',body});
+  let tex;
+  try {
+    tex=await compile(note('- One\n  - Two\n    - Three\n      - Four'),{},opts,'tex');
+    assert.doesNotMatch(tex.output.toString(), /\\usepackage\{enumitem\}/);
+    const excessive=Array.from({length:21},(_,i)=>'    '.repeat(i)+'- Level '+(i+1)).join('\n');
+    await assert.rejects(compile(note(excessive),{},opts,'tex'), /supports up to 20 levels/);
+  } finally { await clean(tex); }
+});
+
 test('renders alternative math delimiters and bookdown equation references', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
   const body = String.raw`\[toc\]
 
@@ -155,6 +197,45 @@ x^2=4
     tex = await compile(note, {}, {pandoc:process.env.SCHOLAR_TEST_PANDOC}, 'tex');
     for (const token of [String.raw`\(x+1\)`, String.raw`\(x+2\)`, String.raw`\[x^2=4\]`]) assert.ok(tex.output.toString().includes(token), `Missing ${token}`);
   } finally { await clean(tex); }
+});
+
+test('applies document styles to LaTeX and PDF while respecting note YAML', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const opts = {pandoc:process.env.SCHOLAR_TEST_PANDOC, engine:'/Library/TeX/texbin/xelatex'};
+  const body = String.raw`# Introduction
+
+See equation \@ref(eq:result).
+
+$$x=1 (\#eq:result)$$`;
+  const note = {id:'layout', title:'Layout test', body};
+  for (const [style, font, geometry, spacing, klass] of [
+    ['article','11pt','margin=1in','1.15','article'],
+    ['manuscript','12pt','margin=1in','2','article'],
+    ['compact','10pt','margin=0.75in','1','article'],
+    ['report','11pt','margin=1in','1.15','report'],
+  ]) {
+    let tex;
+    try {
+      tex = await compile(note, {}, {...opts,documentStyle:style}, 'tex');
+      const text=tex.output.toString();
+      assert.match(text, new RegExp(`\\\\documentclass\\[[\\s\\S]*?${font},[\\s\\S]*?\\]\\{${klass}\\}`));
+      assert.ok(text.includes(`\\usepackage[${geometry}]{geometry}`));
+      assert.ok(text.includes(`\\setstretch{${spacing}}`));
+      assert.ok(text.includes('\\eqref{eq:result}'));
+      if (style === 'report') assert.match(text, /\\chapter\{Introduction\}/);
+    } finally { await clean(tex); }
+  }
+  let pdf, overridden, margins;
+  try {
+    pdf = await compile(note, {}, {...opts,documentStyle:'manuscript'}, 'pdf');
+    assert.equal(pdf.output.subarray(0,5).toString(), '%PDF-');
+    overridden = await compile({...note,body:'---\ndocumentclass: report\nfontsize: 10pt\ngeometry: margin=2in\nlinestretch: 1.5\n---\n\n'+body}, {}, {...opts,documentStyle:'manuscript'}, 'tex');
+    const text=overridden.output.toString();
+    assert.match(text, /\\documentclass\[[\s\S]*?10pt,[\s\S]*?\]\{report\}/);
+    assert.ok(text.includes('\\usepackage[margin=2in]{geometry}'));
+    assert.ok(text.includes('\\setstretch{1.5}'));
+    margins = await compile({...note,body:'---\nmargin-left: 2in\n---\n\n'+body}, {}, {...opts,documentStyle:'manuscript'}, 'tex');
+    assert.ok(margins.output.toString().includes('\\usepackage[lmargin=2in]{geometry}'));
+  } finally { await clean(pdf); await clean(overridden); await clean(margins); }
 });
 
 test('the bundled paper renders with embedded references regardless of global bibliography settings', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
@@ -324,9 +405,10 @@ test('applies bundled citation styles and gives R Markdown csl metadata preceden
   try {
     const note = {id:'s',title:'Paper',body:'A claim [@smith2023].'};
     apa = await compile(note, {}, {...opts, citationStyle:'apa'}, 'tex');
-    ieee = await compile(note, {}, {...opts, citationStyle:'ieee'}, 'tex');
+    ieee = await compile(note, {}, {...opts, citationStyle:'ieee', documentStyle:'manuscript'}, 'tex');
     assert.match(apa.output.toString(), /Smith, 2023/);
     assert.match(ieee.output.toString(), /\[1\]/);
+    assert.match(ieee.output.toString(), /\\setstretch\{2\}/);
     metadata = await compile({...note, body:'---\ncsl: ieee.csl\n---\n\nA claim [@smith2023].'}, {}, {...opts, citationStyle:'apa'}, 'tex');
     assert.match(metadata.output.toString(), /\[1\]/);
     assert.doesNotMatch(metadata.output.toString(), /Smith, 2023/);

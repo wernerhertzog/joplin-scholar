@@ -2,7 +2,8 @@
 body { margin: 0; color: var(--joplin-color, #30343b); background: var(--joplin-background-color, #f6f7f9); font: 13px system-ui, sans-serif; }
 .app { height: 100vh; display: flex; flex-direction: column; padding: 8px; gap: 6px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
-h1 { margin: 0 5px 0 0; font-size: 14px; line-height: 1.2; }
+h1 { margin: 0 5px 0 0; font-size: 14px; line-height: 1.2; display: inline-flex; align-items: center; gap: 5px; }
+.brand-icon { display: block; width: 18px; height: 18px; flex: none; }
 .toolbar button { padding: 4px 5px; font-size: 12px; }
 .export-menu { position: relative; font-size: 12px; }
 .export-menu summary { list-style: none; cursor: pointer; border: 1px solid var(--joplin-divider-color, #aab1ba); border-radius: 5px; padding: 4px 6px; }

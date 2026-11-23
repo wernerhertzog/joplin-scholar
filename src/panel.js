@@ -97,6 +97,10 @@ document.querySelector('#copy-footnote').addEventListener('click', () => { footn
 const styleSelect = document.querySelector('#citation-style');
 const styleStatus = document.querySelector('#style-status');
 styleSelect.addEventListener('change', () => { styleSelect.disabled = true; styleStatus.hidden = false; styleStatus.textContent = 'Saving style…'; send({type:'setStyle', noteId:styleNoteId, value:styleSelect.value}); });
+const documentStyleSelect = document.querySelector('#document-style');
+const documentStyleStatus = document.querySelector('#document-style-status');
+let documentStyleNoteId = null;
+documentStyleSelect.addEventListener('change', () => { documentStyleSelect.disabled = true; documentStyleStatus.hidden = false; documentStyleStatus.textContent = 'Saving document style…'; send({type:'setDocumentStyle', noteId:documentStyleNoteId, value:documentStyleSelect.value}); });
 const grid = document.querySelector('#table-grid');
 function makeGrid() {
   const rows = Number(document.querySelector('#table-rows').value), columns = Number(document.querySelector('#table-cols').value);
@@ -157,7 +161,18 @@ webviewApi.onMessage(event => {
   if (!message || typeof message !== 'object') return;
   if (message.type === 'exampleCreating') { exampleButton.disabled = true; exampleStatus.hidden = false; exampleStatus.textContent = 'Creating example paper…'; }
   if (message.type === 'exampleCreated' || message.type === 'exampleError') { exampleButton.disabled = false; exampleStatus.hidden = false; exampleStatus.textContent = message.message; }
-  if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; }
+  if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; documentStyleNoteId = null; documentStyleSelect.disabled = true; documentStyleStatus.hidden = true; }
+  if (message.type === 'documentStyle') {
+    documentStyleNoteId = message.noteId;
+    documentStyleSelect.value = message.value;
+    documentStyleSelect.disabled = !message.noteId;
+    const notices = [];
+    if (message.value !== 'default' && message.overrides?.length) notices.push(`YAML overrides: ${message.overrides.join(', ')}.`);
+    if (message.value !== 'default' && message.customTemplate) notices.push('The custom template may ignore these settings.');
+    documentStyleStatus.textContent = notices.join(' ');
+    documentStyleStatus.hidden = !notices.length;
+  }
+  if (message.type === 'documentStyleError') { documentStyleSelect.disabled = !documentStyleNoteId; documentStyleStatus.hidden = false; documentStyleStatus.textContent = message.message; }
   if (message.type === 'style') {
     styleNoteId = message.noteId;
     styleSelect.querySelector('option[value="__metadata__"]')?.remove();

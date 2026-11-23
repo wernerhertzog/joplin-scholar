@@ -1,5 +1,7 @@
 # Joplin Scholar
 
+![Joplin Scholar logo](https://raw.githubusercontent.com/wernerhertzog/joplin-scholar/main/assets/icon-128.png)
+
 A desktop Joplin plugin for writing academic papers in Markdown. Scholar builds a live, typeset PDF preview as you write and can export PDF or LaTeX using Pandoc and a LaTeX engine installed on your computer.
 
 Scholar supports abstracts; authors and affiliations; footnotes; captioned figures and tables; contents, figure and table lists; Pandoc citations; Zotero integration; and bundled citation styles. The preview supports text selection, zoom, and opening a snapshot in your default PDF viewer.
@@ -18,6 +20,19 @@ Scholar supports abstracts; authors and affiliations; footnotes; captioned figur
 Select a notebook and click **Example paper** in the Scholar panel. Scholar creates and opens a new note in that notebook, with a real image attachment. The paper explains and demonstrates authors, an abstract, contents lists, figures and tables, math and equation references, footnotes, citations, bibliography styles, the preview, and export. Explore its Markdown beside the PDF preview, then edit your copy. Clicking the button again creates another independent copy; existing notes are never overwritten. The example is also available as [Markdown](examples/joplin-scholar-example.md), its [image](examples/example-workflow.png), and a [sample PDF](examples/joplin-scholar-example.pdf). When using the Markdown outside the button, import the image as a Joplin attachment and replace its relative image path with Joplin's attachment link.
 
 The example includes inline reference records and an explicit empty `bibliography: []` in its YAML. Together these tell Scholar to use the embedded references regardless of the global bibliography setting, so Zotero is not required for the example. A working Pandoc and LaTeX installation is still required for the PDF preview. For your own papers, remove or change the embedded reference records and `bibliography` field when switching to a Zotero library or bibliography file.
+
+## Document styles
+
+Choose **Document style** above the preview. The selection applies to the PDF preview, PDF export, and LaTeX export, and is saved with the selected note as Joplin user data. It syncs with the note but is not included in a plain Markdown export. **Default / note settings** preserves Pandoc's normal defaults and the note's own metadata. The other presets provide starting points:
+
+| Preset | Layout |
+|:---|:---|
+| Standard article | Article, 11 pt, 1-inch margins, 1.15 line spacing |
+| Double-spaced manuscript | Article, 12 pt, 1-inch margins, double spacing |
+| Compact article | Article, 10 pt, 0.75-inch margins, single spacing |
+| Report | Report class, 11 pt, 1-inch margins, 1.15 line spacing; top-level headings become chapters |
+
+These are general-purpose layouts, not journal submission templates. The **Citation style** dropdown controls citations independently. To customise a paper, add Pandoc YAML fields such as `documentclass`, `fontsize`, `geometry`, or `linestretch` to the note: explicit YAML fields take precedence over the corresponding preset values. If the note sets any individual margin field (such as `margin-left`), the preset's margins are omitted so Pandoc can apply the note's margin settings. A configured custom LaTeX template may ignore some of these fields.
 
 ## Authors and affiliations
 
@@ -73,6 +88,10 @@ This paper examines …
 ```
 
 Scholar converts the first such heading and the text after it into a LaTeX abstract, stopping at the next heading or a table-of-contents marker. Formatting, mathematics, and citations inside the abstract are processed normally. This affects Scholar's preview and exports; the note itself remains ordinary Joplin Markdown. Custom LaTeX templates must provide an `abstract` environment.
+
+## Nested lists
+
+Markdown bullet and numbered lists can be nested up to 20 levels in the preview and exports. For lists deeper than four levels, Scholar uses the LaTeX `enumitem` package, normally included in a full LaTeX installation. Exported LaTeX for these notes includes the same list configuration. Very deep outlines have less room for text on each line.
 
 ## Mathematics and equation references
 
