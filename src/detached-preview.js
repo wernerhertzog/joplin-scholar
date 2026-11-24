@@ -12,7 +12,7 @@ function createDetachedPreview({html, directory, onMessage, onConnect, onDisconn
   const prefix = `/${token}/`;
   const clients = new Set();
   let server, origin, disconnectTimer, expiryTimer, started = false, ended = false;
-  const allowed = new Set(['ready','refresh','openPdf','export','createExample','setDocumentStyle','setStyle','copyTable','saveAuthors','pickCitation','copyFootnote']);
+  const allowed = new Set(['ready','refresh','openPdf','export','createExample','setDocumentStyle','setDocumentOptions','setStyle','saveMetadata','reloadMetadata','pickCitation','copyFootnote']);
   const assets = {'panel.css':'text/css; charset=utf-8', 'panel.js':'text/javascript; charset=utf-8', 'worker.js':'text/javascript; charset=utf-8'};
   const bridge = `window.scholarDetached = true;
   let listener = () => {}, connected = false, pending = [];

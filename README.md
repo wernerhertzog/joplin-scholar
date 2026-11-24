@@ -57,13 +57,19 @@ IEEE journal mode uses two columns, while Pandoc's multipage tables require one 
 
 To customise a paper, add Pandoc YAML fields such as `documentclass`, `classoption`, `fontsize`, `geometry`, or `linestretch` to the note: explicit YAML fields take precedence over the corresponding preset values. If the note sets any individual margin field (such as `margin-left`), the preset's margins are omitted so Pandoc can apply the note's margin settings. A different YAML `documentclass` bypasses the selected publisher adapter. A configured custom Pandoc LaTeX template takes precedence over Scholar's publisher adapters and may ignore selected layout settings; ensure that template supports the chosen class and author metadata.
 
-## Authors and affiliations
+## Document options
 
-Open **Authors** in the Scholar toolbar, add each author in order, and enter each affiliation on a separate line. Shared affiliations receive the same number in the PDF. Use the arrows to change author order, select at most one corresponding author, and enter that author's email if desired. Click **Save authors** to update the preview. The email is printed only for the corresponding author.
+Open **Document options** for the current note to choose continuous line numbers, affiliations below the authors or at the end, line spacing, section numbering, and A4 or US Letter paper. Each defaults to the selected document style. Changes apply to the preview, PDF, and LaTeX exports and are saved as Joplin user data with the note, not in plain Markdown exports. An explicit `linestretch`, `numbersections`, or `papersize` in YAML takes precedence over the corresponding option. Line numbering requires the `lineno` TeX package.
 
-Author details are stored as Joplin user data on the selected note and sync with it; they are not part of the note's text or a plain Markdown export. The PDF and generated `.tex` use standard LaTeX title and author commands, including a corresponding-author title footnote. A custom Pandoc template must render the `author` variable, and journal-specific templates may require further adjustment.
+Most publisher-specific classes and custom templates control their author layout. For these, leave affiliation placement at **Style default**; switch to a general style to place affiliations at the end. The ACM class also controls line spacing. Publisher templates can impose other layout requirements, so inspect the result and follow the journal's instructions.
 
-You can instead put Pandoc or R Markdown YAML metadata at the very start of the note, where it is part of the Markdown itself:
+## Document metadata and authors
+
+Open **Document metadata** in the Scholar toolbar to edit the title, subtitle, date, authors and affiliations. The title field shows the Joplin note title by default; if you change it and save, the new document title is written to YAML without renaming the note. Clearing the document title returns to the note-title default. Use **Full YAML** to edit any other field, including keywords, abstracts, bibliographies, inline references and custom metadata. Click **Save metadata** to write the changes into the YAML at the start of the note. Existing unrelated metadata and comments are preserved where possible; inspect the YAML after complex edits. The default note title remains linked to the note and is not copied into YAML unless you edit it.
+
+Add each author in order, with one affiliation per line. Shared affiliations receive the same number in the PDF. Use the arrows to change author order, select any corresponding authors, and enter their emails if desired. You can also specify author and affiliation URLs or author notes. The PDF and generated `.tex` use the selected document style's author commands. A custom Pandoc template must render the `author` variable, and journal-specific templates may require further adjustment.
+
+The same data can be edited directly as Pandoc or R Markdown YAML at the very start of the note:
 
 ```yaml
 ---
@@ -82,7 +88,9 @@ author:
 
 Both `author` and `authors` are accepted. A single author can be a string, or authors can be a list of strings or detailed records. R Markdown title footnotes work, for example `author: Jane Doe^[Example University, jane@example.org]`. Detailed records also accept R Markdown's `url` and `affiliation_url` fields as links; when an author has multiple affiliations, `affiliation_url` applies to the first. An email is shown as the corresponding author's contact when `corresponding: true` is set. Title footnote contents are treated as plain text. The plugin reads these metadata fields; it does not run R or apply R Markdown's `output` setting. A frontmatter `title` is used for the paper title; otherwise Scholar uses the Joplin note title.
 
-When author metadata is present in Markdown, it takes precedence over the panel's separately saved author list. The panel displays the Markdown authors as read-only. Removing the Markdown author field restores the saved panel list. Edit YAML in the Markdown editor: switching to the rich-text editor may alter it.
+Authors previously saved by older versions are shown in the panel. Saving metadata copies them into the note's YAML; until then, existing saved authors remain available to previews and exports. Save metadata while the note is open in Joplin's Markdown editor: Scholar checks the live editor before changing its front matter so unsaved writing is not overwritten. If the note is still being saved, wait and try again. If metadata changes elsewhere while you have a panel draft, copy the draft and use **Reload metadata** before saving. Edits to the same field in both the guided fields and Full YAML must be saved one at a time. Switching to the rich-text editor may alter YAML.
+
+Joplin's own note properties, including its internal author, note timestamps, tags, and source URL, are separate from Scholar's paper metadata. Scholar does not automatically synchronize them with YAML. Joplin's [Markdown with Front Matter importer/exporter](https://joplinapp.org/help/dev/spec/interop_with_frontmatter/) uses some of the same field names for note properties, and its importer ignores unsupported fields. Do not assume a round trip through that format will preserve all Scholar metadata; keep a copy of your original note and check the imported result.
 
 ## Footnotes
 
@@ -146,7 +154,7 @@ Put `[toc]` on a line by itself where you want the table of contents. Joplin Sch
 
 ## Figures and tables
 
-Use **Table** in the toolbar to choose the number of body rows and columns, enter the header and cells, and add a caption. Click **Copy table**, then paste it into the Markdown editor. Resizing retains cells that still fit.
+Use Joplin's table tool or write a Markdown pipe table in the note. Add a caption using the Pandoc syntax shown below.
 
 Attach or paste an image in Joplin. In the Markdown editor, put the image on its own, with a blank line before and after, and write its caption inside the brackets. Keep the attachment ID Joplin generated:
 

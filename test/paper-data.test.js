@@ -28,17 +28,17 @@ test('reads Pandoc and R Markdown authors from YAML frontmatter', () => {
   assert.throws(() => markdownAuthors('---\nauthor:\n  - name: A\n    corresponding: "yes"\n---\nBody'), /true or false/);
 });
 
-test('authors share numbered affiliations, escape TeX, and have one corresponding author', () => {
+test('authors share numbered affiliations, escape TeX, and can both correspond', () => {
   const authors = normalizeAuthors([
     { name:'Alice & Co', affiliations:['UZH, Zürich', 'Institute_2'], email:'a_b@example.org', corresponding:true },
-    { name:'Bob #2', affiliations:['UZH, Zürich'], corresponding:false },
+    { name:'Bob #2', affiliations:['UZH, Zürich'], email:'bob@example.org', corresponding:true },
   ]);
   const tex = latexAuthors(authors);
   assert.match(tex, /Alice \\& Co\\textsuperscript\{1,2\}/);
   assert.match(tex, /Corresponding author: Alice \\& Co \(a\\_b@example.org\)/);
   assert.match(tex, /Bob \\#2\\textsuperscript\{1\}/);
   assert.equal((tex.match(/UZH, Zürich/g) || []).length, 1);
-  assert.throws(() => normalizeAuthors([{name:'A', corresponding:true},{name:'B', corresponding:true}]), /only one/);
+  assert.match(tex, /Corresponding author: Bob \\#2 \(bob@example.org\)/);
   assert.throws(() => normalizeAuthors([{name:'', email:'a@example.org'}]), /name/);
 });
 

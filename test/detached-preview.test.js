@@ -16,12 +16,13 @@ test('detached preview opens a real window, updates, handles controls and restor
   const detached = createDetachedPreview({html, directory:path.join(root,'dist'), open:async value=>{url=value;}, onConnect:async()=>{connected++;}, onDisconnect:async()=>{disconnected++;}, onMessage:async message=>{
     messages.push(message);
     if (message.type === 'ready') {
-      detached.send({type:'authors', noteId:'n1', authors:[]});
+      detached.send({type:'metadata',noteId:'n1',metadata:{version:'v1',yaml:'',fields:{title:'',subtitle:'',date:''},complex:[],authors:[]}});
       detached.send({type:'documentStyle', noteId:'n1', value:'default', overrides:[]});
+      detached.send({type:'documentOptions',noteId:'n1',value:{lineNumbers:'default',affiliations:'default',spacing:'default',sections:'default',paperSize:'default'}});
       detached.send({type:'style', noteId:'n1', value:'default'});
       detached.send({type:'pdf', base64:pdf});
     }
-    if (message.type === 'saveAuthors') detached.send({type:'authorsSaved', noteId:message.noteId, revision:message.revision});
+    if (message.type === 'saveMetadata') detached.send({type:'metadataSaved', noteId:message.noteId, revision:message.revision});
   }});
   const browser = await chromium.launch({headless:true, executablePath:process.env.SCHOLAR_TEST_BROWSER});
   try {
@@ -45,17 +46,22 @@ test('detached preview opens a real window, updates, handles controls and restor
     await popup.locator('#document-style').selectOption('manuscript');
     await popup.waitForTimeout(100);
     assert.ok(messages.some(message=>message.type==='setDocumentStyle' && message.noteId==='n1' && message.value==='manuscript'));
+    await popup.getByRole('button',{name:'Document options'}).click();
+    await popup.locator('#option-lineNumbers').selectOption('on');
+    await popup.waitForFunction(()=>document.querySelector('#document-options-status').textContent.includes('Saving'));
+    for (let i=0; i<20 && !messages.some(message=>message.type==='setDocumentOptions'); i++) await new Promise(resolve=>setTimeout(resolve,50));
+    assert.ok(messages.some(message=>message.type==='setDocumentOptions' && message.noteId==='n1' && message.value.lineNumbers==='on'));
     detached.send({type:'clear'});
     await popup.waitForFunction(()=>document.querySelectorAll('.pdf-page').length===0);
     detached.send({type:'pdf', base64:pdf});
     await popup.locator('.pdf-page canvas').first().waitFor({timeout:20000});
-    await popup.getByRole('button',{name:'Authors', exact:true}).click();
+    await popup.getByRole('button',{name:'Document metadata'}).click();
     await popup.getByRole('button',{name:'Add author'}).click();
     await popup.locator('.author-name').fill('Alice');
     await popup.getByRole('button',{name:'Return to Joplin'}).click();
-    assert.match(await popup.locator('#authors-status').textContent(), /Save your author changes/);
-    await popup.getByRole('button',{name:'Save authors'}).click();
-    await popup.waitForFunction(()=>document.querySelector('#authors-status').textContent === 'Authors saved.');
+    assert.match(await popup.locator('#authors-status').textContent(), /Save your metadata changes/);
+    await popup.getByRole('button',{name:'Save metadata'}).click();
+    await popup.waitForFunction(()=>document.querySelector('#authors-status').textContent === 'Metadata saved in the note.');
     await popup.getByRole('button',{name:'Return to Joplin'}).click();
     await popup.waitForEvent('close');
     for (let i=0; i<30 && !disconnected; i++) await new Promise(resolve=>setTimeout(resolve,50));

@@ -5,11 +5,12 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const run = promisify(execFile);
-const { latexAuthors, markdownAuthors, markdownMetadata, formatFootnotes } = require('./paper-data');
+const { latexAuthors, latexAffiliations, markdownAuthors, markdownMetadata, formatFootnotes } = require('./paper-data');
 const { exportBibliography } = require('./zotero');
 const { styles, styleId } = require('./citation-styles');
 const { hasBookdownEquations, transformEquations } = require('./equations');
 const { layoutDefaults, documentStyles, documentStyleId } = require('./document-styles');
+const { normalizeDocumentOptions } = require('./document-options');
 const { authorCommands, extractAbstract, ieeeTables, publisherTemplate } = require('./publisher-styles');
 const { MAX_LIST_DEPTH, mayContainLists, maximumListDepth, deepListPreamble } = require('./nested-lists');
 const MARKDOWN_FORMAT = 'markdown+tex_math_single_backslash';
@@ -166,8 +167,11 @@ async function compile(note, data, options, format) {
     await stageNote(note, data, dir);
     const metadata = markdownMetadata(note.body);
     const style = documentStyles[documentStyleId(options.documentStyle) || 'default'];
+    const documentOptions = normalizeDocumentOptions(options.documentOptions);
     const classMatches = !metadata?.documentclass || metadata.documentclass === style.metadata.documentclass;
     const adapter = classMatches && !options.template ? style.adapter : null;
+    if (documentOptions.affiliations !== 'default' && (options.template || (adapter && adapter !== 'ieee'))) throw new Error('Affiliation placement is controlled by this publisher style or custom template. Choose Style default, or switch to a general document style.');
+    if (documentOptions.spacing !== 'default' && adapter === 'acm') throw new Error('The ACM class controls line spacing. Choose Style default for spacing, or switch to a general document style.');
     if (style.adapter === 'springer' && classMatches) {
       let classFile = options.springerClass;
       if (!classFile) {
@@ -188,7 +192,8 @@ async function compile(note, data, options, format) {
     // Book classes do not necessarily define an abstract environment.
     const bookAbstract = style.chapterStyle && classMatches ? '\\makeatletter\n\\@ifundefined{abstract}{\\newenvironment{abstract}{\\chapter*{Abstract}}{}}{}\n\\makeatother\n' : '';
     const bookPreamble = classMatches && style.preamble === 'classicthesis' ? '\\providecolor{Maroon}{cmyk}{0,0.87,0.68,0.32}\n\\providecolor{RoyalBlue}{cmyk}{1,0.5,0,0}\n\\ifPDFTeX\\else\n\\let\\scholarSetMonoFont\\setmonofont\n\\renewcommand{\\setmonofont}[2][]{}\n\\fi\n\\usepackage[palatino=false,beramono=false]{classicthesis}\n\\ifPDFTeX\\else\\let\\setmonofont\\scholarSetMonoFont\\fi\n' : '';
-    await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + bookPreamble + bookAbstract + (depth > 4 ? deepListPreamble() : ''));
+    const lineNumbers = documentOptions.lineNumbers === 'on' ? '\\usepackage{lineno}\n\\AtBeginDocument{\\linenumbers}\n' : documentOptions.lineNumbers === 'off' ? '\\makeatletter\n\\AtBeginDocument{\\@ifundefined{nolinenumbers}{}{\\nolinenumbers}}\n\\makeatother\n' : '';
+    await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + bookPreamble + bookAbstract + lineNumbers + (depth > 4 ? deepListPreamble() : ''));
     if (equations || adapter) {
       document = equations ? transformEquations(parsed) : parsed;
       if (adapter) extractAbstract(document);
@@ -200,6 +205,9 @@ async function compile(note, data, options, format) {
     const args = [document ? 'paper.json' : 'paper.md', document ? '--from=json' : `--from=${MARKDOWN_FORMAT}`, '--standalone', '--include-in-header=scholar-compat.tex'];
     if (style.chapterStyle && classMatches) args.push('--top-level-division=chapter');
     const layout = layoutDefaults(options.documentStyle, metadata);
+    if (documentOptions.spacing !== 'default') layout.linestretch = {single:1, onehalf:1.5, double:2}[documentOptions.spacing];
+    if (documentOptions.sections !== 'default') layout.numbersections = documentOptions.sections === 'on';
+    if (documentOptions.paperSize !== 'default') layout.papersize = documentOptions.paperSize;
     if (Object.keys(layout).length) {
       await fs.writeFile(path.join(dir, 'scholar-layout.json'), JSON.stringify(layout), 'utf8');
       // Input YAML overrides these defaults, including when the input is Pandoc JSON.
@@ -208,8 +216,15 @@ async function compile(note, data, options, format) {
     if (!metadata || !metadata.title) args.push(`--metadata=title:${note.title || 'Untitled'}`);
     const inlineAuthors = markdownAuthors(note.body);
     const selectedAuthors = inlineAuthors === null ? (options.authors || []) : inlineAuthors;
-    const authors = latexAuthors(selectedAuthors);
+    const authors = latexAuthors(selectedAuthors, {affiliationsAtEnd:documentOptions.affiliations === 'end'});
     if (authors || inlineAuthors !== null) args.push('--variable', `author=${authors}`);
+    if (documentOptions.affiliations === 'end') {
+      const affiliations = latexAffiliations(selectedAuthors, {chapter:!!style.chapterStyle && classMatches});
+      if (affiliations) {
+        await fs.writeFile(path.join(dir, 'scholar-affiliations.tex'), affiliations, 'utf8');
+        args.push('--include-after-body=scholar-affiliations.tex');
+      }
+    }
     if (adapter) {
       let base;
       try { base = (await run(options.pandoc || 'pandoc', ['--print-default-template=latex'], {env:processEnvironment(), timeout:30000})).stdout; }

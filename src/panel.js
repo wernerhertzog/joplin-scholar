@@ -8,10 +8,13 @@ const errorText = document.querySelector('#error-text');
 const authorsList = document.querySelector('#authors-list');
 const authorsStatus = document.querySelector('#authors-status');
 const addAuthorButton = document.querySelector('#add-author');
-const saveAuthorsButton = document.querySelector('#save-authors');
+const saveAuthorsButton = document.querySelector('#save-metadata');
+const reloadMetadataButton = document.querySelector('#reload-metadata');
+const metadataYaml = document.querySelector('#metadata-yaml');
+const metadataFields = Object.fromEntries(['title','subtitle','date'].map(key => [key, document.querySelector(`#metadata-${key}`)]));
 const footnoteText = document.querySelector('#footnote-text');
 const footnoteStatus = document.querySelector('#footnote-status');
-let authorNoteId = null, authorRevision = 0, authorsInMarkdown = false;
+let authorNoteId = null, authorRevision = 0, metadataBase = null;
 const authorDrafts = new Map();
 let styleNoteId = null, previewStatus = 'idle';
 const send = message => webviewApi.postMessage(message);
@@ -41,8 +44,8 @@ if (window.scholarDetached) { detachButton.textContent = 'Return to Joplin'; det
 window.addEventListener('beforeunload', event => { if (window.scholarDetached && authorDrafts.size) { event.preventDefault(); event.returnValue = ''; } });
 detachButton.addEventListener('click', () => {
   if (authorDrafts.size) {
-    openTool(toolToggles.find(button => button.getAttribute('aria-controls') === 'authors-panel'));
-    authorsStatus.textContent = 'Save your author changes before moving the preview. If you edited another note, return to it and save those changes too.';
+    openTool(toolToggles.find(button => button.getAttribute('aria-controls') === 'metadata-panel'));
+    authorsStatus.textContent = 'Save your metadata changes before moving the preview. If you edited another note, return to it and save those changes too.';
     return;
   }
   if (window.scholarDetached) window.scholarReturn();
@@ -53,18 +56,26 @@ document.querySelector('#export-pdf').addEventListener('click', () => { exportMe
 document.querySelector('#export-tex').addEventListener('click', () => { exportMenu.open = false; send({ type: 'export', format: 'tex' }); });
 function readAuthors() {
   return [...authorsList.querySelectorAll('.author-row')].map(row => ({
+    ...row.authorData,
     name: row.querySelector('.author-name').value,
     email: row.querySelector('.author-email').value,
-    affiliations: row.querySelector('.author-affiliations').value.split('\n'),
+    url: row.querySelector('.author-url').value,
+    affiliationUrl: row.querySelector('.author-affiliation-url').value,
+    notes: row.querySelector('.author-notes').value.split('\n').map(value => value.trim()).filter(Boolean),
+    affiliations: row.querySelector('.author-affiliations').value.split('\n').map(value => value.trim()).filter(Boolean),
     corresponding: row.querySelector('.author-corresponding').checked,
   }));
 }
-function authorChanged() {
-  if (!authorNoteId) return;
+function metadataChanged(authorsChanged = false) {
+  if (!authorNoteId || !metadataBase) return;
   authorRevision++;
-  authorDrafts.set(authorNoteId, readAuthors());
+  const previous = authorDrafts.get(authorNoteId);
+  authorDrafts.set(authorNoteId, {base:metadataBase, authors:readAuthors(), fields:Object.fromEntries(Object.entries(metadataFields).map(([key, input])=>[key,input.value])), yaml:metadataYaml.value, authorsChanged:authorsChanged || !!previous?.authorsChanged, revision:authorRevision});
   authorsStatus.textContent = 'Unsaved changes';
 }
+function authorChanged() { metadataChanged(true); }
+for (const input of Object.values(metadataFields)) input.addEventListener('input', () => metadataChanged());
+metadataYaml.addEventListener('input', () => metadataChanged());
 function field(labelText, value, className, multiline = false) {
   const label = document.createElement('label');
   label.textContent = labelText;
@@ -77,24 +88,20 @@ function field(labelText, value, className, multiline = false) {
 }
 function renderAuthors(authors) {
   authorsList.replaceChildren();
-  const noneLabel = document.createElement('label');
-  noneLabel.className = 'corresponding-choice';
-  const none = document.createElement('input');
-  none.type = 'radio'; none.name = 'corresponding-author'; none.checked = !authors.some(a => a.corresponding);
-  none.addEventListener('change', authorChanged);
-  noneLabel.append(none, document.createTextNode(' No corresponding author selected'));
-  authorsList.appendChild(noneLabel);
   authors.forEach((author, index) => {
-    const row = document.createElement('section'); row.className = 'author-row';
+    const row = document.createElement('section'); row.className = 'author-row'; row.authorData = author;
     const heading = document.createElement('strong'); heading.textContent = `Author ${index + 1}`; row.appendChild(heading);
     row.appendChild(field('Name', author.name, 'author-name'));
     row.appendChild(field('Affiliations (one per line)', (author.affiliations || []).join('\n'), 'author-affiliations', true));
     row.appendChild(field('Email (shown for corresponding author)', author.email, 'author-email'));
+    row.appendChild(field('Author URL (optional)', author.url, 'author-url'));
+    row.appendChild(field('First affiliation URL (optional)', author.affiliationUrl, 'author-affiliation-url'));
+    row.appendChild(field('Author notes (one per line)', (author.notes || []).join('\n'), 'author-notes', true));
     const choice = document.createElement('label'); choice.className = 'corresponding-choice';
-    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'corresponding-author'; radio.className = 'author-corresponding'; radio.checked = !!author.corresponding;
-    choice.append(radio, document.createTextNode(' Corresponding author')); row.appendChild(choice);
+    const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'author-corresponding'; checkbox.checked = !!author.corresponding;
+    choice.append(checkbox, document.createTextNode(' Corresponding author')); row.appendChild(choice);
     const actions = document.createElement('div'); actions.className = 'actions';
-    const move = (label, action, disabled = false) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', action); actions.appendChild(button); };
+    const move = (label, action, disabled = false) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.dataset.boundaryDisabled = String(disabled); button.addEventListener('click', action); actions.appendChild(button); };
     move('↑', () => { const values = readAuthors(); [values[index - 1], values[index]] = [values[index], values[index - 1]]; renderAuthors(values); authorChanged(); }, index === 0);
     move('↓', () => { const values = readAuthors(); [values[index + 1], values[index]] = [values[index], values[index + 1]]; renderAuthors(values); authorChanged(); }, index === authors.length - 1);
     move('Remove', () => { const values = readAuthors(); values.splice(index, 1); renderAuthors(values); authorChanged(); });
@@ -102,8 +109,26 @@ function renderAuthors(authors) {
     authorsList.appendChild(row);
   });
 }
-addAuthorButton.addEventListener('click', () => { if (!authorNoteId || authorsInMarkdown) return; const values = readAuthors(); values.push({ name:'', email:'', affiliations:[], corresponding:false }); renderAuthors(values); authorChanged(); });
-saveAuthorsButton.addEventListener('click', () => { if (authorNoteId && !authorsInMarkdown) { saveAuthorsButton.disabled = true; authorsStatus.textContent = 'Saving…'; send({ type:'saveAuthors', noteId:authorNoteId, authors:readAuthors(), revision:authorRevision }); } });
+addAuthorButton.addEventListener('click', () => { if (!authorNoteId) return; const values = readAuthors(); values.push({ name:'', email:'', affiliations:[], corresponding:false }); renderAuthors(values); authorChanged(); });
+function setMetadataEnabled(enabled) {
+  for (const element of document.querySelectorAll('#metadata-panel input, #metadata-panel textarea, #metadata-panel button')) element.disabled = !enabled;
+  if (enabled) for (const button of authorsList.querySelectorAll('button[data-boundary-disabled="true"]')) button.disabled = true;
+  if (enabled && metadataBase) for (const key of metadataBase.complex || []) metadataFields[key].disabled = true;
+  if (enabled && metadataBase?.authorsError) { addAuthorButton.disabled = true; for (const element of authorsList.querySelectorAll('input,textarea,button')) element.disabled = true; }
+}
+saveAuthorsButton.addEventListener('click', () => {
+  if (!authorNoteId || !metadataBase) return;
+  if (!authorDrafts.has(authorNoteId) && !metadataBase.legacy) { authorsStatus.textContent = 'No metadata changes to save.'; return; }
+  const draft = authorDrafts.get(authorNoteId) || {base:metadataBase, authors:readAuthors(), fields:Object.fromEntries(Object.entries(metadataFields).map(([key,input])=>[key,input.value])), yaml:metadataYaml.value, authorsChanged:false, revision:authorRevision};
+  const fields = Object.fromEntries(Object.entries(draft.fields).filter(([key,value])=>value !== draft.base.fields[key] && !draft.base.complex.includes(key)));
+  setMetadataEnabled(false); authorsStatus.textContent = 'Saving…';
+  send({type:'saveMetadata', noteId:authorNoteId, version:draft.base.version, yaml:draft.yaml, yamlChanged:draft.yaml !== draft.base.yaml, fields, authors:draft.authors, authorsChanged:draft.authorsChanged, revision:draft.revision});
+});
+reloadMetadataButton.addEventListener('click', () => {
+  if (!authorNoteId) return;
+  if (authorDrafts.has(authorNoteId) && !window.confirm('Discard unsaved metadata changes and reload from the note?')) return;
+  authorDrafts.delete(authorNoteId); metadataBase = null; setMetadataEnabled(false); authorsStatus.textContent = 'Loading metadata…'; send({type:'reloadMetadata'});
+});
 document.querySelector('#pick-citation').addEventListener('click', () => send({type:'pickCitation'}));
 document.querySelector('#copy-footnote').addEventListener('click', () => { footnoteStatus.textContent = 'Preparing footnote…'; send({ type:'copyFootnote', text:footnoteText.value }); });
 const styleSelect = document.querySelector('#citation-style');
@@ -113,26 +138,17 @@ const documentStyleSelect = document.querySelector('#document-style');
 const documentStyleStatus = document.querySelector('#document-style-status');
 let documentStyleNoteId = null;
 documentStyleSelect.addEventListener('change', () => { documentStyleSelect.disabled = true; documentStyleStatus.hidden = false; documentStyleStatus.textContent = 'Saving document style…'; send({type:'setDocumentStyle', noteId:documentStyleNoteId, value:documentStyleSelect.value}); });
-const grid = document.querySelector('#table-grid');
-function makeGrid() {
-  const rows = Number(document.querySelector('#table-rows').value), columns = Number(document.querySelector('#table-cols').value);
-  const tableStatus = document.querySelector('#table-status');
-  if (!Number.isInteger(rows) || rows < 1 || rows > 20 || !Number.isInteger(columns) || columns < 1 || columns > 10) { tableStatus.textContent = 'Choose 1–20 body rows and 1–10 columns.'; return; }
-  const previous = [...grid.querySelectorAll('tr')].map(row => [...row.querySelectorAll('input')].map(input => input.value));
-  const table = document.createElement('table');
-  for (let r = 0; r <= rows; r++) {
-    const row = table.insertRow();
-    for (let c = 0; c < columns; c++) {
-      const cell = row.insertCell(), input = document.createElement('input');
-      input.type = 'text'; input.value = previous[r]?.[c] || ''; input.placeholder = r === 0 ? `Header ${c + 1}` : '';
-      input.setAttribute('aria-label', r === 0 ? `Header column ${c + 1}` : `Row ${r}, column ${c + 1}`); cell.appendChild(input);
-    }
-  }
-  grid.replaceChildren(table); tableStatus.textContent = '';
-}
-document.querySelector('#table-resize').addEventListener('click', makeGrid);
-document.querySelector('#copy-table').addEventListener('click', () => send({type:'copyTable', rows:[...grid.querySelectorAll('tr')].map(row => [...row.querySelectorAll('input')].map(input => input.value)), caption:document.querySelector('#table-caption').value}));
-makeGrid();
+const documentOptionsKeys = ['lineNumbers', 'affiliations', 'spacing', 'sections', 'paperSize'];
+const documentOptionInputs = Object.fromEntries(documentOptionsKeys.map(key => [key, document.querySelector(`#option-${key}`)]));
+const documentOptionsStatus = document.querySelector('#document-options-status');
+let documentOptionsNoteId = null;
+for (const input of Object.values(documentOptionInputs)) input.addEventListener('change', () => {
+  if (!documentOptionsNoteId) return;
+  const value = Object.fromEntries(documentOptionsKeys.map(key => [key, documentOptionInputs[key].value]));
+  for (const element of Object.values(documentOptionInputs)) element.disabled = true;
+  documentOptionsStatus.textContent = 'Saving document options…';
+  send({type:'setDocumentOptions', noteId:documentOptionsNoteId, value});
+});
 function showRenderError(error) { status.textContent = 'Could not display the PDF.'; errorText.textContent = error.message; errors.hidden = false; }
 function clearError() { errors.hidden = true; errorText.textContent = ''; }
 const pdf = new PdfPreview({element:preview, getDocument, TextLayer, onError:showRenderError, onReady:() => {
@@ -173,7 +189,20 @@ webviewApi.onMessage(event => {
   if (!message || typeof message !== 'object') return;
   if (message.type === 'exampleCreating') { exampleButton.disabled = true; exampleStatus.hidden = false; exampleStatus.textContent = 'Creating example paper…'; }
   if (message.type === 'exampleCreated' || message.type === 'exampleError') { exampleButton.disabled = false; exampleStatus.hidden = false; exampleStatus.textContent = message.message; }
-  if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; documentStyleNoteId = null; documentStyleSelect.disabled = true; documentStyleStatus.hidden = true; }
+  if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; documentStyleNoteId = null; documentStyleSelect.disabled = true; documentStyleStatus.hidden = true; documentOptionsNoteId = null; for (const input of Object.values(documentOptionInputs)) input.disabled = true; documentOptionsStatus.textContent = 'Loading document options…'; }
+  if (message.type === 'documentOptions') {
+    documentOptionsNoteId = message.noteId;
+    for (const key of documentOptionsKeys) { documentOptionInputs[key].value = message.value[key]; documentOptionInputs[key].disabled = !message.noteId; }
+    for (const option of documentOptionInputs.affiliations.options) if (option.value !== 'default') option.disabled = !!message.locked;
+    for (const option of documentOptionInputs.spacing.options) if (option.value !== 'default') option.disabled = !!message.spacingLocked;
+    const notices = [];
+    if (message.locked) notices.push('This publisher style or custom template controls affiliation placement. Choose Style default for affiliations.');
+    if (message.spacingLocked) notices.push('The ACM class controls line spacing. Choose Style default for spacing.');
+    if (message.customTemplate) notices.push('The custom template may ignore other document options.');
+    if (message.overrides?.length) notices.push(`YAML takes precedence: ${message.overrides.join(', ')}.`);
+    documentOptionsStatus.textContent = !message.noteId ? 'Select a note.' : notices.join(' ') || 'Saved with this note. Changes apply to preview and exports.';
+  }
+  if (message.type === 'documentOptionsError') { for (const input of Object.values(documentOptionInputs)) input.disabled = !documentOptionsNoteId; documentOptionsStatus.textContent = message.message; }
   if (message.type === 'documentStyle') {
     documentStyleNoteId = message.noteId;
     documentStyleSelect.value = message.value;
@@ -197,13 +226,23 @@ webviewApi.onMessage(event => {
     styleStatus.textContent = message.metadata ? `Style is set by YAML (csl: ${message.metadata}). Edit the note to change it.` : '';
   }
   if (message.type === 'styleError') { styleStatus.hidden = false; styleStatus.textContent = message.message; }
-  if (message.type === 'tableCopied') document.querySelector('#table-status').textContent = 'Copied. Paste into the Markdown editor.';
-  if (message.type === 'tableError') document.querySelector('#table-status').textContent = message.message;
-  if (message.type === 'authorsLoading') { authorNoteId = null; authorsList.replaceChildren(); saveAuthorsButton.disabled = true; addAuthorButton.disabled = true; authorsStatus.textContent = 'Loading authors…'; }
-  if (message.type === 'authors') { authorNoteId = message.noteId; authorRevision = 0; authorsInMarkdown = message.source === 'markdown'; const draft = authorsInMarkdown ? null : authorDrafts.get(authorNoteId); renderAuthors(draft || message.authors); if (authorsInMarkdown) for (const element of authorsList.querySelectorAll('input,textarea,button')) element.disabled = true; saveAuthorsButton.disabled = !authorNoteId || authorsInMarkdown; addAuthorButton.disabled = !authorNoteId || authorsInMarkdown; authorsStatus.textContent = !authorNoteId ? 'Select a note.' : authorsInMarkdown ? 'Authors are defined in Markdown. Edit the metadata at the start of the note; panel authors remain saved separately.' : draft ? 'Unsaved changes' : 'Authors saved with this note.'; }
-  if (message.type === 'authorsError') { authorNoteId = null; saveAuthorsButton.disabled = true; addAuthorButton.disabled = true; authorsStatus.textContent = message.message; }
-  if (message.type === 'authorsSaved' && authorNoteId === message.noteId) { saveAuthorsButton.disabled = false; if (authorRevision === message.revision) { authorDrafts.delete(authorNoteId); authorsStatus.textContent = 'Authors saved.'; } else authorsStatus.textContent = 'Saved; newer changes are not yet saved.'; }
-  if (message.type === 'authorsSaveError' && authorNoteId === message.noteId) { saveAuthorsButton.disabled = false; authorsStatus.textContent = message.message; }
+  if (message.type === 'metadataLoading') { authorNoteId = null; metadataBase = null; authorsList.replaceChildren(); setMetadataEnabled(false); authorsStatus.textContent = 'Loading metadata…'; }
+  if (message.type === 'metadata') {
+    authorNoteId = message.noteId;
+    if (!authorNoteId) { metadataBase = null; setMetadataEnabled(false); authorsStatus.textContent = 'Select a note.'; }
+    else {
+      const draft = authorDrafts.get(authorNoteId); metadataBase = draft?.base || message.metadata; authorRevision = draft?.revision || 0;
+      renderAuthors(draft?.authors || metadataBase.authors);
+      for (const [key,input] of Object.entries(metadataFields)) input.value = draft?.fields[key] ?? metadataBase.fields[key];
+      metadataYaml.value = draft?.yaml ?? metadataBase.yaml;
+      setMetadataEnabled(true);
+      authorsStatus.textContent = draft ? (draft.base.version !== message.metadata.version ? 'The note metadata changed. Copy your draft and reload before saving.' : 'Unsaved changes') : metadataBase.authorsError ? `Edit authors in Full YAML: ${metadataBase.authorsError}` : metadataBase.legacy ? 'Older authors are stored separately. Save metadata to add them to this note.' : metadataBase.complex.length ? `Edit ${metadataBase.complex.join(', ')} in Full YAML.` : 'Saved in the note’s YAML metadata.';
+    }
+  }
+  if (message.type === 'metadataError') { metadataBase = null; setMetadataEnabled(false); authorsStatus.textContent = message.message; }
+  if (message.type === 'metadataSaved') { const draft = authorDrafts.get(message.noteId); if (draft && draft.revision === message.revision) authorDrafts.delete(message.noteId); if (authorNoteId === message.noteId) { setMetadataEnabled(true); authorsStatus.textContent = message.warning || 'Metadata saved in the note.'; } }
+  if (message.type === 'metadataSaveError' && authorNoteId === message.noteId) { setMetadataEnabled(true); authorsStatus.textContent = message.message; }
+  if (message.type === 'metadataNotice' && authorNoteId === message.noteId) authorsStatus.textContent = message.message;
   if (message.type === 'citationPicking') { document.querySelector('#pick-citation').disabled = true; document.querySelector('#citation-result').hidden = true; document.querySelector('#citation-status').textContent = 'Choose a source in Zotero…'; }
   if (message.type === 'citationCancelled') { document.querySelector('#pick-citation').disabled = false; document.querySelector('#citation-status').textContent = 'No citation selected.'; }
   if (message.type === 'citationCopied') { document.querySelector('#pick-citation').disabled = false; document.querySelector('#citation-status').textContent = 'Copied. Paste into your note. Keep Zotero open to generate references, or use a configured bibliography file.'; const result = document.querySelector('#citation-result'); result.textContent = message.citation; result.hidden = false; }

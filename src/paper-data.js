@@ -14,7 +14,7 @@ function cleanUrl(value) {
   } catch { throw new Error('Author and affiliation URLs must begin with http:// or https://.'); }
 }
 function normalizeAuthors(input) {
-  if (!Array.isArray(input) || input.length > 50) throw new Error('Authors must be a list of at most 50 people.');
+  if (!Array.isArray(input) || input.length > 200) throw new Error('Authors must be a list of at most 200 people.');
   const authors = [];
   for (const row of input) {
     if (!row || typeof row !== 'object') throw new Error('Invalid author entry.');
@@ -28,7 +28,6 @@ function normalizeAuthors(input) {
     if (!name && (email || affiliations.length || corresponding || notes.length || url || affiliationUrl)) throw new Error('Enter a name for each author.');
     if (name) authors.push({ name, email, affiliations, corresponding, notes, url, affiliationUrl });
   }
-  if (authors.filter(a => a.corresponding).length > 1) throw new Error('Choose only one corresponding author.');
   return authors;
 }
 // R Markdown permits title footnotes such as `Jane Doe^[University, email]`.
@@ -40,7 +39,7 @@ function authorInlineNotes(value) {
     let j = i + 2, depth = 1, content = '';
     for (; j < value.length && depth; j++) {
       const ch = value[j];
-      if (ch === '\\' && j + 1 < value.length) { content += ch + value[++j]; continue; }
+      if (ch === '\\' && j + 1 < value.length) { const next = value[++j]; content += '[]\\'.includes(next) ? next : ch + next; continue; }
       if (ch === '[') depth++;
       if (ch === ']') { depth--; if (!depth) break; }
       content += ch;
@@ -60,7 +59,7 @@ function markdownMetadata(markdown) {
     if (/^(?:---|\.\.\.)[ \t\r]*$/.test(lines[i])) { end = i; break; }
   }
   if (end < 0) return null;
-  const header = lines.slice(1, end).join('\n');
+  const header = lines.slice(1, end).map(line => line.replace(/\r$/, '')).join('\n');
   let metadata;
   try {
     const doc = YAML.parseDocument(header, { uniqueKeys: true });
@@ -102,7 +101,7 @@ function escapeLatex(text) {
   const map = { '\\':'\\textbackslash{}', '{':'\\{', '}':'\\}', '#':'\\#', '$':'\\$', '%':'\\%', '&':'\\&', '_':'\\_', '^':'\\textasciicircum{}', '~':'\\textasciitilde{}' };
   return String(text).replace(/[\\{}#$%&_^~]/g, char => map[char]);
 }
-function latexAuthors(input) {
+function latexAuthors(input, {affiliationsAtEnd = false} = {}) {
   const authors = normalizeAuthors(input || []);
   if (!authors.length) return '';
   const affiliations = [], affiliationUrls = new Map();
@@ -120,7 +119,17 @@ function latexAuthors(input) {
     return value;
   });
   const lines = affiliations.map((affiliation, i) => `{\\small \\textsuperscript{${i + 1}}${link(affiliation, affiliationUrls.get(affiliation))}}`);
-  return [...[names.join(' \\quad ')], ...lines].join(' \\\\[0.5ex] ');
+  return [names.join(' \\quad '), ...(affiliationsAtEnd ? [] : lines)].join(' \\\\[0.5ex] ');
+}
+function latexAffiliations(input, {chapter = false} = {}) {
+  const authors = normalizeAuthors(input || []), affiliations = [], urls = new Map();
+  for (const author of authors) for (const [index, affiliation] of author.affiliations.entries()) {
+    if (!affiliations.includes(affiliation)) affiliations.push(affiliation);
+    if (index === 0 && author.affiliationUrl && !urls.has(affiliation)) urls.set(affiliation, author.affiliationUrl);
+  }
+  if (!affiliations.length) return '';
+  const lines = affiliations.map((a, i) => `\\noindent\\textsuperscript{${i + 1}}${urls.has(a) ? `\\href{${escapeLatex(urls.get(a))}}{${escapeLatex(a)}}` : escapeLatex(a)}\\par`);
+  return `\\${chapter ? 'chapter' : 'section'}*{Author affiliations}\n${lines.join('\n')}\n`;
 }
 // Keep literal examples in fenced and indented code, HTML comments, and inline code.
 function formatFootnotes(markdown) {
@@ -143,4 +152,4 @@ function formatFootnotes(markdown) {
     });
   }).join('\n');
 }
-module.exports = { AUTHOR_KEY, normalizeAuthors, markdownAuthors, markdownMetadata, latexAuthors, escapeLatex, formatFootnotes };
+module.exports = { AUTHOR_KEY, normalizeAuthors, markdownAuthors, markdownMetadata, latexAuthors, latexAffiliations, escapeLatex, formatFootnotes };

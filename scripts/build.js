@@ -14,7 +14,7 @@ fs.mkdirSync(publish, { recursive: true });
   fs.writeFileSync(path.join(stylesDir, 'styles.json'), JSON.stringify(styles));
   await esbuild.build({ entryPoints: [path.join(root, 'src/index.js')], bundle: true, platform: 'node', target: 'node18', outfile: path.join(dist, 'index.js') });
   for (const name of ['worker', 'panel']) await esbuild.build({ entryPoints: [path.join(root, `src/${name}.js`)], bundle: true, platform: 'browser', format: 'iife', target: 'chrome120', outfile: path.join(dist, `${name}.js`) });
-  for (const name of ['manifest.json', 'panel.css']) fs.copyFileSync(path.join(root, 'src', name), path.join(dist, name));
+  for (const name of ['manifest.json', 'panel.css', 'metadata-codemirror.js']) fs.copyFileSync(path.join(root, 'src', name), path.join(dist, name));
   // Reuse the actual logo's geometry as a monochrome, theme-coloured mask.
   const logo = fs.readFileSync(path.join(root, 'assets/joplin-scholar-logo.svg'), 'utf8');
   const shapes = (logo.match(/<path\b[^>]*\/>/g) || []).join('').replace(/fill="#fff"/g, 'fill="black"');
@@ -32,6 +32,6 @@ fs.mkdirSync(publish, { recursive: true });
   fs.copyFileSync(path.join(root, 'src/styles/LICENSE.txt'), path.join(dist, 'CSL-STYLES-LICENSE.txt'));
   const archive = path.join(publish, 'joplin-scholar.jpl');
   fs.rmSync(archive, { force: true });
-  execFileSync('tar', ['-cf', archive, 'index.js', 'manifest.json', 'panel.css', 'toolbar.css', 'panel.js', 'worker.js', 'joplin-scholar-example.md', 'example-workflow.png', 'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'LICENSE', 'PDFJS-LICENSE', 'YAML-LICENSE', 'CSL-STYLES-LICENSE.txt'], { cwd: dist, env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  execFileSync('tar', ['-cf', archive, 'index.js', 'manifest.json', 'panel.css', 'toolbar.css', 'panel.js', 'worker.js', 'metadata-codemirror.js', 'joplin-scholar-example.md', 'example-workflow.png', 'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'LICENSE', 'PDFJS-LICENSE', 'YAML-LICENSE', 'CSL-STYLES-LICENSE.txt'], { cwd: dist, env: { ...process.env, COPYFILE_DISABLE: '1' } });
   console.log(`Built ${archive}`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

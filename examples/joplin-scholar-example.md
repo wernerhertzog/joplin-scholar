@@ -53,7 +53,7 @@ This document is a demonstration rather than a research study. Its source is int
 
 ## Title, authors, and abstract
 
-The YAML at the beginning of this note supplies its title and authors. Alice and Benjamin share an affiliation; Alice also has a second affiliation and a corresponding-author email. To use the **Authors** panel instead, remove the author metadata, add authors and affiliations, choose at most one corresponding author, and save. YAML takes precedence and also accepts R Markdown author lists and optional author and affiliation URLs.
+The YAML at the beginning of this note supplies its title and authors. Alice and Benjamin share an affiliation; Alice also has a second affiliation and a corresponding-author email. Open **Document metadata** to edit authors and their affiliations, select corresponding authors, or edit title, subtitle and date. **Full YAML** lets you change any other metadata field. Save to write your changes into the note. The YAML also accepts R Markdown author lists and optional author and affiliation URLs.
 
 The **Abstract** heading above becomes a LaTeX abstract; it ends at the next heading or contents marker. It can include *emphasis*, **strong text**, mathematics, and citations. Use Joplin's Markdown editor for YAML and the specialised examples in this paper.[^editor]
 
@@ -65,7 +65,7 @@ Headings organise the paper, and `[toc]` produces the table of contents. The sep
 
 Scholar rebuilds after edits; adjust the delay in **Settings → Joplin Scholar**, or use **Refresh**. Scroll and select text in the preview. Use the zoom controls or hold Shift while turning the wheel; without Shift, the wheel scrolls. **Open PDF** opens a snapshot in the default viewer; open it again after editing. **Detach** opens the live preview and controls in a separate browser window; **Return to Joplin** restores the panel.
 
-The **Document style** dropdown changes layout for this note and its exports; YAML layout fields take precedence. Choices include book and report layouts, KOMA-Script, Memoir, ClassicThesis, Tufte, APA 7, Elsevier, IEEE, ACM, REVTeX and Springer Nature. Book layouts turn top-level headings into chapters. Each style needs its corresponding TeX package; Springer Nature's `sn-jnl.cls` can be configured in Scholar settings. IEEE tables occupy full-width pages. Publisher and thesis layouts are starting points; follow the journal's or university's instructions. **Citation style** controls references independently.
+The **Document style** dropdown changes layout for this note and its exports; YAML layout fields take precedence. **Document options** adds line numbers, moves affiliations to the end, changes line spacing, numbers sections, or switches between A4 and US Letter. Some publisher classes control affiliation placement. Choices include book and report layouts, KOMA-Script, Memoir, ClassicThesis, Tufte, APA 7, Elsevier, IEEE, ACM, REVTeX and Springer Nature. Book layouts turn top-level headings into chapters. Each style needs its corresponding TeX package; Springer Nature's `sn-jnl.cls` can be configured in Scholar settings. IEEE tables occupy full-width pages. Publisher and thesis layouts are starting points; follow the journal's or university's instructions. **Citation style** controls references independently.
 
 ## Mathematics and numbered equations
 
@@ -93,7 +93,7 @@ Figure 1 is a Joplin image attachment. To add your own, attach or paste an image
 
 Downloaded attachments appear in the PDF and the LaTeX export. The caption is also the default alternative text. Figure and table references are not automatic, so Figure 1 is mentioned by hand.
 
-For Table 1, write a Pandoc pipe table or use **Table**: choose rows and columns, fill the cells, enter a caption, and copy it into the Markdown editor. The caption appears in the list of tables.
+For Table 1, write a Pandoc pipe table or insert a table using Joplin's editor, then add the caption on a separate line after it using `Table: Your caption`. The caption appears in the list of tables.
 
 | Stage | In Joplin | Scholar's contribution |
 |:------|:----------|:-----------------------|

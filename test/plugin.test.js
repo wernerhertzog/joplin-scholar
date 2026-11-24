@@ -33,14 +33,15 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
   let openedSnapshot;
   let callbacks = {}, sent = [], note = { id: 'a', title: 'First', body: 'Text' }, start, clipboard = '', panelHtml = '', panelVisible = true;
   const commands = {}, toolbarButtons = [], cssFiles = [];
-  const authorData = new Map(), styleData = new Map(), documentStyleData = new Map();
-  const storeFor = key => key.endsWith('citation-style') ? styleData : key.endsWith('document-style') ? documentStyleData : authorData;
+  const authorData = new Map(), migratedData = new Map(), styleData = new Map(), documentStyleData = new Map(), documentOptionsData = new Map();
+  const storeFor = key => key.endsWith('authors-migrated') ? migratedData : key.endsWith('citation-style') ? styleData : key.endsWith('document-style') ? documentStyleData : key.endsWith('document-options') ? documentOptionsData : authorData;
   global.joplin = {
     plugins: { register: x => { start = x.onStart; }, installationDir:async()=>path.join(__dirname,'../dist') },
+    contentScripts:{register:async()=>{}},
     settings: { registerSection: async()=>{}, registerSettings: async()=>{}, values: async()=>({ pandoc:fake, engine:'xelatex', delay:500 }), onChange: async fn=>{callbacks.settings=fn;} },
     views: { panels: { create:async()=> 'p', setHtml:async(_,html)=>{panelHtml=html;}, addScript:async()=>{}, postMessage:(_,m)=>sent.push(m), onMessage:async(_,fn)=>{callbacks.message=fn;}, visible:async()=>panelVisible, show:async(_,value)=>{panelVisible=value;} }, menuItems: {create:async()=>{}}, toolbarButtons:{create:async(...args)=>toolbarButtons.push(args)}, dialogs: {showOpenDialog:async()=>[root]} },
     window:{loadChromeCssFile:async file=>cssFiles.push(file)},
-    commands: {register:async command=>{commands[command.name]=command;}}, data:{ userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
+    commands: {register:async command=>{commands[command.name]=command;}, execute:async(command,opts)=>{if(command==='editor.execCommand'){const [expected,oldHead,newHead]=opts.args;if(note.body!==expected)return {ok:false,reason:'changed'};note.body=newHead+note.body.slice(oldHead.length);return {ok:true};}}}, data:{ userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
     workspace:{ selectedNote:async()=>({...note}), onNoteChange:async fn=>{callbacks.change=fn;}, onNoteSelectionChange:async fn=>{callbacks.selection=fn;} },
   };
   try {
@@ -49,6 +50,8 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     assert.ok(panelHtml.indexOf('id="document-style"') < panelHtml.indexOf('id="citation-style"'));
     assert.match(panelHtml, /class="brand-icon" src="data:image\/png;base64,/);
     assert.doesNotMatch(panelHtml, /figure-panel/);
+    assert.doesNotMatch(panelHtml, /table-panel/);
+    assert.match(panelHtml, /Document options/);
     assert.deepEqual(toolbarButtons, [['toggleJoplinScholarToolbar', 'toggleJoplinScholar', 'noteToolbar']]);
     assert.equal(commands.toggleJoplinScholar.label, 'Toggle Joplin Scholar');
     assert.match(commands.toggleJoplinScholar.iconName, /scholar-toolbar-icon/);
@@ -61,6 +64,7 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     await delay(200);
     note = {id:'b',title:'Second',body:'Different'}; callbacks.selection();
     for (let i=0; i<50 && !sent.some(m=>m.type==='pdf'); i++) await delay(100);
+    assert.ok(sent.some(m=>m.type==='metadata' && m.noteId==='b' && m.metadata.fields.title==='Second' && m.metadata.titleFromNote));
     const previews = sent.filter(m=>m.type==='pdf');
     assert.equal(previews.length, 1); assert.equal(previews[0].title, 'Second');
     if (process.platform !== 'win32') {
@@ -83,11 +87,13 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
       assert.equal(panelVisible, true);
       await stream.body.cancel();
     }
-    await callbacks.message({type:'saveAuthors', noteId:'b', revision:1, authors:[{name:'Alice', affiliations:['UZH'], email:'alice@example.org', corresponding:true}]});
-    assert.equal(authorData.get('b')[0].name, 'Alice');
-    await callbacks.message({type:'saveAuthors', noteId:'a', revision:2, authors:[{name:'Wrong note'}]});
-    assert.equal(authorData.has('a'), false);
-    assert.ok(sent.some(m=>m.type==='authorsSaveError'));
+    const {inspectMetadata}=require('../src/metadata-editor');
+    let metadata=inspectMetadata(note.body);
+    await callbacks.message({type:'saveMetadata', noteId:'b', version:metadata.version, revision:1, authorsChanged:true, authors:[{name:'Alice', affiliations:['UZH'], email:'alice@example.org', corresponding:true},{name:'Bob',email:'bob@example.org',corresponding:true}]});
+    assert.equal(require('../src/paper-data').markdownAuthors(note.body)[1].name, 'Bob');
+    assert.equal(migratedData.get('b'), true);
+    await callbacks.message({type:'saveMetadata', noteId:'a', revision:2, authors:[]});
+    assert.ok(sent.some(m=>m.type==='metadataSaveError'));
     await callbacks.message({type:'copyFootnote', text:'A note'});
     assert.equal(clipboard, '{{fn: A note}}');
     await callbacks.message({type:'setStyle', noteId:'b', value:'apa'});
@@ -102,8 +108,12 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     assert.equal(documentStyleData.get('b'), 'manuscript');
     assert.ok(sent.some(m=>m.type==='documentStyleError'));
     assert.ok(sent.some(m=>m.type==='documentStyle' && m.noteId==='b' && m.value==='manuscript'));
-    await callbacks.message({type:'copyTable', rows:[['Name','Value'],['A','10']], caption:'Results'});
-    assert.match(clipboard, /Table: Results/);
+    await callbacks.message({type:'setDocumentOptions', noteId:'b', value:{lineNumbers:'on',affiliations:'end',spacing:'double',sections:'on',paperSize:'a4'}});
+    assert.equal(documentOptionsData.get('b').lineNumbers, 'on');
+    await callbacks.message({type:'setDocumentOptions', noteId:'a', value:{lineNumbers:'on'}});
+    assert.equal(documentOptionsData.has('a'), false);
+    await callbacks.message({type:'setDocumentOptions', noteId:'b', value:{lineNumbers:'invalid'}});
+    assert.equal(documentOptionsData.get('b').lineNumbers, 'on');
     callbacks.change();
     for (let i=0; i<50 && sent.filter(m=>m.type==='pdf').length<2; i++) await delay(100);
     assert.ok(sent.filter(m=>m.type==='pdf').length >= 2);
@@ -112,16 +122,31 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     note.body = '---\nauthor: [Markdown Person]\n---\nBody';
     const previousPreviews = sent.filter(m=>m.type==='pdf').length;
     callbacks.change();
-    for (let i=0; i<30 && !sent.some(m=>m.type==='authors' && m.source==='markdown'); i++) await delay(100);
-    assert.ok(sent.some(m=>m.type==='authors' && m.source==='markdown' && m.authors[0].name==='Markdown Person'));
-    await callbacks.message({type:'saveAuthors', noteId:'b', revision:3, authors:[{name:'Should not overwrite'}]});
-    assert.equal(authorData.get('b')[0].name, 'Alice');
-    assert.ok(sent.some(m=>m.type==='authorsSaveError' && /defined in Markdown/.test(m.message)));
+    for (let i=0; i<30 && !sent.some(m=>m.type==='metadata' && m.metadata?.authors[0]?.name==='Markdown Person'); i++) await delay(100);
+    assert.ok(sent.some(m=>m.type==='metadata' && m.metadata?.authors[0]?.name==='Markdown Person'));
+    metadata=inspectMetadata(note.body);
+    note.body=note.body.replace('Markdown Person','Changed Person');
+    await callbacks.message({type:'saveMetadata', noteId:'b', version:metadata.version, revision:3, authorsChanged:true, authors:[{name:'Should not overwrite'}]});
+    assert.match(note.body,/Changed Person/);
+    assert.ok(sent.some(m=>m.type==='metadataSaveError' && /metadata changed/.test(m.message)));
     for (let i=0; i<40 && sent.filter(m=>m.type==='pdf').length === previousPreviews; i++) await delay(100);
     assert.ok(sent.filter(m=>m.type==='pdf').length > previousPreviews);
     note.body = '---\ncsl: ieee\n---\nBody';
     await callbacks.message({type:'setStyle', noteId:'b', value:'apa'});
     assert.ok(sent.some(m=>m.type==='styleError' && /defined|YAML/.test(m.message)));
+    note = {id:'legacy',title:'Legacy',body:'# Existing note\n\nKeep this text.'};
+    authorData.set('legacy',[{name:'Old Author',affiliations:['Research Lab'],corresponding:true,email:'old@example.org'}]);
+    callbacks.selection();
+    for (let i=0; i<30 && !sent.some(m=>m.type==='metadata' && m.noteId==='legacy'); i++) await delay(50);
+    const loaded=sent.findLast(m=>m.type==='metadata' && m.noteId==='legacy').metadata;
+    assert.equal(loaded.legacy,true);
+    await callbacks.message({type:'saveMetadata',noteId:'legacy',version:loaded.version,authors:loaded.authors,authorsChanged:false,revision:0});
+    assert.match(note.body,/Old Author/);
+    assert.match(note.body,/# Existing note\n\nKeep this text/);
+    assert.equal(migratedData.get('legacy'),true);
+    assert.equal(authorData.get('legacy')[0].name,'Old Author', 'the legacy backup remains intact');
+    panelVisible=false;
+    await delay(1200);
   } finally {
     delete global.joplin;
     process.env.PATH = oldPath;
@@ -137,6 +162,7 @@ test('creates and opens an example note with its own attachment, and handles fai
   let start, folder = {id:'notebook'}, failNote = false, failOpen = false;
   global.joplin = {
     plugins:{register:x=>{start=x.onStart;},installationDir:async()=>path.join(__dirname,'../dist')},
+    contentScripts:{register:async()=>{}},
     settings:{registerSection:async()=>{},registerSettings:async()=>{},onChange:async()=>{}},
     views:{panels:{create:async()=> 'p',setHtml:async()=>{},addScript:async()=>{},postMessage:(_,m)=>sent.push(m),onMessage:async(_,fn)=>{callbacks.message=fn;}},menuItems:{create:async()=>{}},toolbarButtons:{create:async()=>{}}},
     window:{loadChromeCssFile:async()=>{}},

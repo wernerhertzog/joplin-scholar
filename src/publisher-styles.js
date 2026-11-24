@@ -26,23 +26,24 @@ function authorCommands(style, input) {
   }).join('\n');
   if (style === 'revtex') return authors.map(author => {
     const lines = [`\\author{${link(author.name, author.url)}}`];
-    for (const affiliation of author.affiliations) lines.push(`\\affiliation{${institution(affiliation)}}`);
     for (const note of author.notes) lines.push(`\\thanks{${escapeLatex(note)}}`);
-    if (author.corresponding) { lines.push('\\thanks{Corresponding author}'); if (author.email) lines.push(`\\email{${escapeLatex(author.email)}}`); }
+    if (author.corresponding) lines.push(`\\thanks{${correspondence(author)}}`);
+    for (const affiliation of author.affiliations) lines.push(`\\affiliation{${institution(affiliation)}}`);
     return lines.join('\n');
   }).join('\n');
   if (style === 'elsevier') {
     let noteId = 0;
     const notes = [];
+    let correspondenceId = 0;
+    const correspondenceNotes = [];
     const names = authors.map(author => {
       let name = link(author.name, author.url);
       for (const note of author.notes) { noteId++; name += `\\fnref{n${noteId}}`; notes.push(`\\fntext[n${noteId}]{${escapeLatex(note)}}`); }
-      if (author.corresponding) name += '\\corref{cor1}';
+      if (author.corresponding) { correspondenceId++; name += `\\corref{cor${correspondenceId}}`; correspondenceNotes.push(`\\cortext[cor${correspondenceId}]{${correspondence(author)}}`); }
       const indices = numbered(author).map(i => `a${i}`).join(',');
       return `\\author${indices ? `[${indices}]` : ''}{${name}}`;
     });
-    const corresponding = authors.find(author => author.corresponding);
-    return [...names, ...affiliations.map((affiliation, i) => `\\address[a${i+1}]{${institution(affiliation)}}`), ...(corresponding ? [`\\cortext[cor1]{${correspondence(corresponding)}}`] : []), ...notes].join('\n');
+    return [...names, ...affiliations.map((affiliation, i) => `\\address[a${i+1}]{${institution(affiliation)}}`), ...correspondenceNotes, ...notes].join('\n');
   }
   if (style === 'springer') {
     const names = authors.map(author => {
