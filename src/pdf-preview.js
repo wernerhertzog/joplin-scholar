@@ -215,6 +215,23 @@ class PdfPreview {
       page.textTask = task;
       await task.render();
       if (this.state !== state || page.textToken !== token || !page.canvas) return;
+      let annotations = [];
+      try { annotations = await pdfPage.getAnnotations({intent:'display'}); } catch (_) { /* Text remains selectable even if a PDF has invalid annotations. */ }
+      if (this.state !== state || page.textToken !== token || !page.canvas) return;
+      const links = document.createElement('div'); links.className = 'pdf-link-layer';
+      for (const annotation of annotations) {
+        // Only navigate within this PDF. External links are deliberately left to
+        // the user's PDF viewer; never navigate the Joplin webview to a URL.
+        if (annotation.subtype !== 'Link' || !annotation.dest || !Array.isArray(annotation.rect) || annotation.rect.length !== 4 || !annotation.rect.every(Number.isFinite)) continue;
+        const [x1,y1,x2,y2] = viewport.convertToViewportRectangle(annotation.rect);
+        const link = document.createElement('a');
+        link.className = 'pdf-internal-link'; link.href = '#'; link.setAttribute('aria-label', 'Go to referenced location in PDF');
+        link.style.left = `${Math.min(x1,x2)}px`; link.style.top = `${Math.min(y1,y2)}px`;
+        link.style.width = `${Math.abs(x2-x1)}px`; link.style.height = `${Math.abs(y2-y1)}px`;
+        link.addEventListener('click', event => { event.preventDefault(); void this.navigate(state, annotation.dest); });
+        links.appendChild(link);
+      }
+      overlay.appendChild(links);
       page.overlay = overlay; page.textWidth = cssWidth;
       overlay.style.transform = `scale(${parseFloat(page.holder.style.width) / cssWidth})`;
       page.holder.appendChild(overlay);
@@ -224,6 +241,30 @@ class PdfPreview {
         this.onError(new Error(`Could not make page ${page.index + 1} selectable. ${error.message}`));
       }
     } finally { page.textTask = null; page.textPending = false; if (this.state === state && page.canvas && !page.overlay && !page.textFailed) this.schedule(0); }
+  }
+
+  async navigate(state, destination) {
+    try {
+      const dest = typeof destination === 'string' ? await state.doc.getDestination(destination) : destination;
+      if (this.state !== state || !Array.isArray(dest) || !dest.length) return;
+      const index = typeof dest[0] === 'number' ? dest[0] : await state.doc.getPageIndex(dest[0]);
+      if (this.state !== state || !Number.isInteger(index) || index < 0 || index >= state.pages.length) return;
+      const page = state.pages[index], pdfPage = await state.doc.getPage(index + 1);
+      if (this.state !== state) return;
+      const native = pdfPage.getViewport({scale:1});
+      if (page.width !== native.width || page.height !== native.height) { page.width = native.width; page.height = native.height; this.sizePage(page); }
+      const scale = parseFloat(page.holder.style.width) / native.width;
+      const viewport = pdfPage.getViewport({scale});
+      const mode = dest[1]?.name, top = mode === 'XYZ' ? dest[3] : (mode === 'FitH' || mode === 'FitBH') ? dest[2] : mode === 'FitR' ? dest[5] : null;
+      let y = 0;
+      if (Number.isFinite(top)) {
+        const left = mode === 'XYZ' && Number.isFinite(dest[2]) ? dest[2] : viewport.viewBox[0];
+        y = viewport.convertToViewportPoint(left, top)[1];
+      }
+      const bounds = this.element.getBoundingClientRect(), rect = page.holder.getBoundingClientRect();
+      this.element.scrollTop += rect.top - bounds.top + Math.max(0, y);
+      this.schedule(0);
+    } catch (_) { /* Invalid or missing PDF destinations do not interrupt reading. */ }
   }
 }
 

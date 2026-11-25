@@ -7,16 +7,19 @@ const path = require('node:path');
 // Small real PDF with a different-sized page, generated without external tools.
 function samplePdf(count) {
   const objects = [];
-  objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  const directLinkId = 4 + count * 2, namedLinkId = directLinkId + 1;
+  objects[1] = `<< /Type /Catalog /Pages 2 0 R /Names << /Dests << /Names [(chapter-target) [${4 + 4 * 2} 0 R /XYZ null 750 null]] >> >> >>`;
   objects[2] = `<< /Type /Pages /Count ${count} /Kids [${Array.from({length:count}, (_, i) => `${4 + i * 2} 0 R`).join(' ')}] >>`;
   objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
   for (let i = 0; i < count; i++) {
     const pageId = 4 + i * 2, contentId = pageId + 1;
     const box = '0 0 612 792', rotation = i === 9 ? '/Rotate 90' : '';
     const content = `BT /F1 18 Tf 60 500 Td (Page ${i + 1}) Tj ET`;
-    objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [${box}] ${rotation} /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`;
+    objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [${box}] ${rotation} ${i === 0 ? `/Annots [${directLinkId} 0 R ${namedLinkId} 0 R]` : ''} /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`;
     objects[contentId] = `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`;
   }
+  objects[directLinkId] = `<< /Type /Annot /Subtype /Link /Rect [140 500 200 520] /Border [0 0 0] /Dest [${4 + 11 * 2} 0 R /XYZ null 750 null] >>`;
+  objects[namedLinkId] = '<< /Type /Annot /Subtype /Link /Rect [220 500 280 520] /Border [0 0 0] /Dest (chapter-target) >>';
   let pdf = '%PDF-1.4\n', offsets = [0];
   for (let id = 1; id < objects.length; id++) { offsets[id] = Buffer.byteLength(pdf); pdf += `${id} 0 obj\n${objects[id]}\nendobj\n`; }
   const xref = Buffer.byteLength(pdf);
@@ -63,6 +66,41 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     assert.ok(await page.evaluate(() => window.messages.some(m => m.type === 'saveMetadata' && m.fields.title === 'New title' && m.yaml.includes('custom: value'))));
     await page.evaluate(() => window.onPluginMessage({type:'metadataSaved',noteId:'n1',revision:2}));
     await page.getByRole('button', {name:'Document metadata'}).click();
+    await page.locator('#cite-menu summary').click();
+    await page.waitForFunction(() => window.messages.some(message => message.type === 'loadCitationTargets'));
+    for (const width of [300,500,900]) {
+      await page.setViewportSize({width,height:600});
+      await page.waitForFunction(() => {const r=document.querySelector('.cite-options').getBoundingClientRect();return r.left >= 0 && r.right <= innerWidth;});
+      const bounds=await page.locator('.cite-options').boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x+bounds.width <= width, `Cite dropdown escaped the ${width}px panel`);
+    }
+    await page.setViewportSize({width:520,height:600});
+    assert.equal(await page.locator('#cite-menu').evaluate(element=>element.open),true);
+    assert.equal(await page.getByRole('button',{name:'From Zotero'}).isVisible(),true);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#cite-menu').evaluate(element=>element.open),false);
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('#cite-menu summary')),true);
+    await page.locator('#cite-menu summary').click();
+    assert.equal(await page.getByRole('button',{name:'Figure',exact:true}).isDisabled(),true);
+    await page.evaluate(() => window.onPluginMessage({type:'citationTargets',noteId:'n1',revision:7,targets:[{kind:'sec',title:'Introduction',index:0},{kind:'fig',title:'First figure',index:1},{kind:'fig',title:'Second figure',index:2}]}));
+    assert.equal(await page.getByRole('button',{name:'Figure',exact:true}).isEnabled(),true);
+    assert.equal(await page.getByRole('button',{name:'Table',exact:true}).isDisabled(),true);
+    await page.getByRole('button',{name:'Figure',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:'Figure',exact:true}).getAttribute('aria-pressed'),'true');
+    assert.deepEqual(await page.locator('#citation-targets button').allTextContents(),['First figure','Second figure']);
+    await page.getByRole('button',{name:'Second figure',exact:true}).click();
+    assert.ok(await page.evaluate(() => window.messages.some(m => m.type==='insertCrossReference' && m.kind==='fig' && m.index===2 && m.revision===7)));
+    await page.evaluate(() => window.onPluginMessage({type:'citationError',message:'Start Zotero and enable Better BibTeX.'}));
+    assert.match(await page.locator('#citation-status').textContent(),/Start Zotero/);
+    await page.getByRole('button',{name:'From Zotero'}).click();
+    assert.ok(await page.evaluate(() => window.messages.some(m=>m.type==='pickCitation')));
+    await page.locator('#cite-menu summary').click();
+    assert.equal(await page.locator('#cite-menu').evaluate(element=>element.open),false);
+    await page.getByRole('button',{name:'Project',exact:true}).click();
+    await page.locator('#project-note').fill(':/0123456789abcdef0123456789abcdef');
+    await page.getByRole('button',{name:'Insert note'}).click();
+    assert.ok(await page.evaluate(()=>window.messages.some(m=>m.type==='insertProjectNote' && m.value.startsWith(':/'))));
+    await page.getByRole('button',{name:'Project',exact:true}).click();
     await page.getByRole('button', {name:'Example paper'}).click();
     assert.ok(await page.evaluate(() => window.messages.some(message => message.type === 'createExample')));
     assert.equal(await page.locator('#create-example').isDisabled(), true);
@@ -90,6 +128,8 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     await exportControl.click();
     await page.locator('#export-tex').click();
     assert.ok(await page.evaluate(() => window.messages.some(message => message.type === 'export' && message.format === 'tex')));
+    await exportControl.click(); await page.locator('#export-bundle').click();
+    assert.ok(await page.evaluate(() => window.messages.some(message => message.type === 'export' && message.format === 'bundle')));
     await exportControl.focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Escape');
     assert.equal(await page.locator('#export-menu').evaluate(element => element.open), false);
     const pdf = samplePdf(20);
@@ -104,6 +144,15 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     await page.mouse.move(textBox.x + textBox.width - 1, textBox.y + textBox.height / 2, {steps:8});
     await page.mouse.up();
     assert.equal(await page.evaluate(() => getSelection().toString()), 'Page 1', 'the visible PDF text can be selected');
+    const links = page.locator('.pdf-page').first().locator('.pdf-internal-link');
+    await links.first().waitFor({timeout:15000});
+    assert.equal(await links.count(),2);
+    await links.first().click();
+    await page.waitForFunction(() => { const p=document.querySelector('#preview').getBoundingClientRect(), r=document.querySelectorAll('.pdf-page')[11].getBoundingClientRect(); return r.top < p.bottom && r.bottom > p.top; });
+    await page.locator('#preview').evaluate(element => {element.scrollTop=0;});
+    await links.nth(1).click();
+    await page.waitForFunction(() => { const p=document.querySelector('#preview').getBoundingClientRect(), r=document.querySelectorAll('.pdf-page')[4].getBoundingClientRect(); return r.top < p.bottom && r.bottom > p.top; });
+    await page.locator('#preview').evaluate(element => {element.scrollTop=0;});
     await page.getByRole('button', {name:'Open PDF'}).click();
     assert.ok(await page.evaluate(() => window.messages.some(message => message.type === 'openPdf')));
     assert.equal(await page.locator('.pdf-page').count(), 20);
@@ -119,6 +168,9 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     assert.ok(zoomed.width > initial.width * 1.1, 'zoom changes the page size synchronously');
     assert.equal(zoomed.bitmap, initial.bitmap, 'the existing bitmap remains visible during zoom');
     assert.ok(Math.abs(zoomed.anchorBefore - zoomed.anchorAfter) < .02, 'zoom should stay centered on the pointer');
+    await links.first().click();
+    await page.waitForFunction(() => { const p=document.querySelector('#preview').getBoundingClientRect(), r=document.querySelectorAll('.pdf-page')[11].getBoundingClientRect(); return r.top < p.bottom && r.bottom > p.top; });
+    await page.locator('#preview').evaluate(element => {element.scrollTop=0;});
     const horizontalZoom = await page.evaluate(() => {
       const p=document.querySelector('#preview'), before=document.querySelector('#zoom-fit').textContent;
       p.dispatchEvent(new WheelEvent('wheel', {deltaX:-100, deltaY:-.1, shiftKey:true, bubbles:true, cancelable:true, clientX:250, clientY:300}));

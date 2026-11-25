@@ -9,10 +9,13 @@ const { latexAuthors, latexAffiliations, markdownAuthors, markdownMetadata, form
 const { exportBibliography } = require('./zotero');
 const { styles, styleId } = require('./citation-styles');
 const { hasBookdownEquations, transformEquations } = require('./equations');
+const { hasCrossReferences, transformCrossReferences } = require('./cross-references');
 const { layoutDefaults, documentStyles, documentStyleId } = require('./document-styles');
 const { normalizeDocumentOptions } = require('./document-options');
 const { authorCommands, extractAbstract, ieeeTables, publisherTemplate } = require('./publisher-styles');
 const { MAX_LIST_DEPTH, mayContainLists, maximumListDepth, deepListPreamble } = require('./nested-lists');
+const { resolveProject } = require('./projects');
+const {zipSync, strToU8} = require('fflate');
 const MARKDOWN_FORMAT = 'markdown+tex_math_single_backslash';
 
 function citationKeys(document) {
@@ -40,9 +43,9 @@ async function readPandocDocument(dir, options) {
   return ast;
 }
 
-async function bibliographyFromZotero(dir, options, document = null) {
+async function bibliographyFromZotero(dir, options, document = null, embeddedIds = new Set()) {
   const ast = document || await readPandocDocument(dir, options);
-  const keys = citationKeys(ast);
+  const keys = citationKeys(ast).filter(key => !embeddedIds.has(key));
   if (keys.includes('*')) throw new Error('Listing every Zotero item with nocite: @* is not supported in direct mode. Use a bibliography file for this paper.');
   if (!keys.length) return '';
   const content = await exportBibliography(keys, options.zoteroLibrary || '', options.zoteroEndpoint);
@@ -162,6 +165,7 @@ async function stageNote(note, data, dir) {
 }
 async function compile(note, data, options, format) {
   if (!note || !note.id) throw new Error('Select a note to preview.');
+  if (/\{\{include-note:/i.test(note.body || '')) note = await resolveProject(note, data);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'joplin-scholar-'));
   try {
     await stageNote(note, data, dir);
@@ -184,8 +188,13 @@ async function compile(note, data, options, format) {
     // Older graphicx releases do not recognize Pandoc's image alt key.
     // Define it only if absent; newer releases retain their accessibility support.
     const equations = hasBookdownEquations(note.body);
+    const crossReferences = hasCrossReferences(note.body);
+    const layout = layoutDefaults(options.documentStyle, metadata);
+    if (documentOptions.spacing !== 'default') layout.linestretch = {single:1, onehalf:1.5, double:2}[documentOptions.spacing];
+    if (documentOptions.sections !== 'default') layout.numbersections = documentOptions.sections === 'on';
+    if (documentOptions.paperSize !== 'default') layout.papersize = documentOptions.paperSize;
     let parsed = null, document = null;
-    if (adapter || equations || mayContainLists(note.body)) parsed = await readPandocDocument(dir, options);
+    if (adapter || equations || crossReferences || mayContainLists(note.body)) parsed = await readPandocDocument(dir, options);
     const depth = parsed ? maximumListDepth(parsed.blocks || []) : 0;
     if (depth > MAX_LIST_DEPTH) throw new Error(`This note has ${depth} nested list or quote levels. Joplin Scholar supports up to ${MAX_LIST_DEPTH} levels.`);
     const compat = '\\usepackage{graphicx}\n\\makeatletter\n\\@ifundefined{KV@Gin@alt}{\\define@key{Gin}{alt}{}}{}\n\\makeatother\n';
@@ -194,8 +203,9 @@ async function compile(note, data, options, format) {
     const bookPreamble = classMatches && style.preamble === 'classicthesis' ? '\\providecolor{Maroon}{cmyk}{0,0.87,0.68,0.32}\n\\providecolor{RoyalBlue}{cmyk}{1,0.5,0,0}\n\\ifPDFTeX\\else\n\\let\\scholarSetMonoFont\\setmonofont\n\\renewcommand{\\setmonofont}[2][]{}\n\\fi\n\\usepackage[palatino=false,beramono=false]{classicthesis}\n\\ifPDFTeX\\else\\let\\setmonofont\\scholarSetMonoFont\\fi\n' : '';
     const lineNumbers = documentOptions.lineNumbers === 'on' ? '\\usepackage{lineno}\n\\AtBeginDocument{\\linenumbers}\n' : documentOptions.lineNumbers === 'off' ? '\\makeatletter\n\\AtBeginDocument{\\@ifundefined{nolinenumbers}{}{\\nolinenumbers}}\n\\makeatother\n' : '';
     await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + bookPreamble + bookAbstract + lineNumbers + (depth > 4 ? deepListPreamble() : ''));
-    if (equations || adapter) {
+    if (equations || crossReferences || adapter) {
       document = equations ? transformEquations(parsed) : parsed;
+      if (crossReferences) transformCrossReferences(document, {sectionsNumbered:metadata?.numbersections ?? layout.numbersections ?? false, sectionDepth:metadata?.secnumdepth ?? layout.secnumdepth ?? 5, chapterStyle:!!style.chapterStyle && classMatches});
       if (adapter) extractAbstract(document);
       const classOptions = metadata?.classoption ?? style.metadata.classoption ?? [];
       const oneColumn = (Array.isArray(classOptions) ? classOptions : [classOptions]).includes('onecolumn');
@@ -204,10 +214,6 @@ async function compile(note, data, options, format) {
     }
     const args = [document ? 'paper.json' : 'paper.md', document ? '--from=json' : `--from=${MARKDOWN_FORMAT}`, '--standalone', '--include-in-header=scholar-compat.tex'];
     if (style.chapterStyle && classMatches) args.push('--top-level-division=chapter');
-    const layout = layoutDefaults(options.documentStyle, metadata);
-    if (documentOptions.spacing !== 'default') layout.linestretch = {single:1, onehalf:1.5, double:2}[documentOptions.spacing];
-    if (documentOptions.sections !== 'default') layout.numbersections = documentOptions.sections === 'on';
-    if (documentOptions.paperSize !== 'default') layout.papersize = documentOptions.paperSize;
     if (Object.keys(layout).length) {
       await fs.writeFile(path.join(dir, 'scholar-layout.json'), JSON.stringify(layout), 'utf8');
       // Input YAML overrides these defaults, including when the input is Pandoc JSON.
@@ -244,16 +250,23 @@ async function compile(note, data, options, format) {
     }
     const source = options.bibliographySource || 'auto';
     if (!['auto', 'zotero', 'file'].includes(source)) throw new Error('Select a valid bibliography source in Joplin Scholar settings.');
-    // An explicitly empty bibliography together with inline CSL records is a
-    // self-contained paper. Do not consult a global file or a Zotero library.
-    const inlineOnly = Array.isArray(metadata?.bibliography) && !metadata.bibliography.length && Array.isArray(metadata?.references) && metadata.references.length > 0;
-    const metadataBibliography = !inlineOnly && source !== 'zotero' && !options.bibliography && !!metadata?.bibliography;
-    if (source === 'file' && !options.bibliography && !metadataBibliography && !inlineOnly) throw new Error('Choose a bibliography file in Joplin Scholar settings.');
+    const inlineReferences = Array.isArray(metadata?.references) ? metadata.references : [];
+    const embeddedIds = new Set(inlineReferences.filter(reference => reference && reference.id != null).map(reference => String(reference.id)));
+    const emptyBibliography = Array.isArray(metadata?.bibliography) && !metadata.bibliography.length;
+    const metadataBibliography = !emptyBibliography && source !== 'zotero' && !options.bibliography && !!metadata?.bibliography;
+    // Keep self-contained notes independent of global settings, but look up
+    // newly added citations that are not among the embedded CSL records.
+    let inlineOnly = false;
+    if (inlineReferences.length && emptyBibliography) {
+      const ast = document || parsed || await readPandocDocument(dir, options);
+      inlineOnly = citationKeys(ast).every(key => embeddedIds.has(key));
+    }
+    if (source === 'file' && !options.bibliography && !metadataBibliography && !inlineOnly) throw new Error('Choose a bibliography file in Joplin Scholar settings for citations not included in the note.');
     const bibliography = inlineOnly ? '' : source === 'zotero' || (source === 'auto' && !options.bibliography && !metadataBibliography)
-      ? await bibliographyFromZotero(dir, options, document || parsed) : options.bibliography;
+      ? await bibliographyFromZotero(dir, options, document || parsed, embeddedIds) : options.bibliography;
     if (bibliography) args.push('--citeproc', `--bibliography=${bibliography}`);
-    else if (metadataBibliography || inlineOnly) args.push('--citeproc');
-    if (bibliography || metadataBibliography || inlineOnly) {
+    else if (metadataBibliography || inlineReferences.length) args.push('--citeproc');
+    if (bibliography || metadataBibliography || inlineReferences.length) {
       // YAML takes precedence; built-in names are also accepted without a path.
       const selected = metadata?.csl || (options.citationStyle && options.citationStyle !== 'default' ? options.citationStyle : options.csl);
       if (selected && typeof selected !== 'string') throw new Error('The csl field must be a style name or CSL file path.');
@@ -300,4 +313,23 @@ async function exportResult(result, parent) {
     return path.join(dest, filename);
   } catch (error) { await fs.rm(dest, { recursive: true, force: true }); throw error; }
 }
-module.exports = { compile, clean, exportResult, safeName, stageNote, processEnvironment, expandTocMarkers, formatAbstract, citationKeys, bibliographyFromZotero, readPandocDocument };
+async function exportBundle(result, parent) {
+  if (result.format !== 'tex') throw new Error('A submission bundle requires LaTeX output.');
+  const texFile = await exportResult(result, parent), folder = path.dirname(texFile);
+  try {
+    const files = {};
+    async function collect(dir, prefix = '') {
+      for (const entry of await fs.readdir(dir, {withFileTypes:true})) {
+        const name = prefix + entry.name, full = path.join(dir,entry.name);
+        if (entry.isDirectory()) await collect(full, name + '/');
+        else if (entry.isFile()) files[name] = new Uint8Array(await fs.readFile(full));
+      }
+    }
+    await collect(folder);
+    files['README.txt'] = strToU8('Joplin Scholar submission bundle\n\nUpload this ZIP as a new project in Overleaf or extract it locally. Select the included .tex file as the main document and compile with XeLaTeX at least twice. The required LaTeX classes and packages must be available in your TeX installation or Overleaf project.\n\nCitations and the bibliography have already been rendered by Pandoc; this is not an editable BibTeX/BibLaTeX project. Check the PDF and journal requirements before submitting.\n');
+    const zip = path.join(folder, `${result.name}.zip`);
+    await fs.writeFile(zip, zipSync(files, {level:6}));
+    return zip;
+  } catch (error) { await fs.rm(folder, {recursive:true,force:true}); throw error; }
+}
+module.exports = { compile, clean, exportResult, exportBundle, safeName, stageNote, processEnvironment, expandTocMarkers, formatAbstract, citationKeys, bibliographyFromZotero, readPandocDocument };

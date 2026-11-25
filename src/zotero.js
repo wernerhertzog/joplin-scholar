@@ -45,13 +45,13 @@ function requestPicker(url, timeoutMs) {
       });
       response.on('error', reject);
       response.on('end', () => {
-        if (response.statusCode !== 200) return reject(new Error(`Zotero picker returned HTTP ${response.statusCode}. Check that Better BibTeX is installed and enabled.`));
+        if (response.statusCode !== 200) return reject(new Error(`Zotero picker returned HTTP ${response.statusCode}. Make sure Zotero is running and Better BibTeX is installed and enabled.`));
         resolve(text.trim());
       });
     });
-    request.setTimeout(timeoutMs, () => request.destroy(new Error('The Zotero picker timed out. Please try again.')));
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('The Zotero picker timed out. Make sure Zotero is running and Better BibTeX is enabled, then try again.')));
     request.on('error', error => {
-      if (error.code === 'ECONNREFUSED' || error.code === 'EHOSTUNREACH') reject(new Error('Start Zotero and install or enable the Better BibTeX plugin, then try again.'));
+      if (['ECONNREFUSED','EHOSTUNREACH','ECONNRESET','ETIMEDOUT','ENOTFOUND'].includes(error.code)) reject(new Error('Could not connect to Zotero. Start Zotero and install or enable the Better BibTeX plugin, then try again.'));
       else reject(error);
     });
   });

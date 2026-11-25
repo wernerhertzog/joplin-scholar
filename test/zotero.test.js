@@ -58,3 +58,11 @@ test('cancel, missing Better BibTeX, and unexpected responses never return a cit
     await assert.rejects(chooseCitation(base), /unexpected citation/);
   });
 });
+
+test('an unreachable Zotero picker explains how to reconnect', async () => {
+  const server=http.createServer();
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const port=server.address().port;
+  await new Promise(resolve=>server.close(resolve));
+  await assert.rejects(chooseCitation(`http://127.0.0.1:${port}/better-bibtex/cayw`),/Start Zotero.*Better BibTeX/);
+});

@@ -11,9 +11,17 @@ Scholar supports abstracts; authors and affiliations; footnotes; captioned figur
 1. Install Joplin Desktop 3.3 or later, [Pandoc](https://pandoc.org/installing.html), and a LaTeX distribution that supplies `xelatex` (such as MacTeX, TeX Live, or MiKTeX). You can set executable paths in **Settings → Joplin Scholar** if they are not found. On macOS Homebrew users can install Pandoc with `brew install pandoc`.
 2. If Joplin Scholar is available in Joplin's plugin directory, search for it under **Settings → Plugins**, install it, and restart Joplin. Alternatively, download `joplin-scholar.jpl` from the [latest GitHub release](https://github.com/wernerhertzog/joplin-scholar/releases/latest), then use **Settings → Plugins → Plugin tools → Install from file**. Quit and restart Joplin.
 3. Select a note. Use the **Toggle Joplin Scholar** logo button in the note toolbar to open or hide the panel. The same command is available through **View → Toggle Joplin Scholar**. Use **View → Change application layout** to move the panel next to your editor.
-4. Pause after editing for the preview to rebuild. Refresh forces a rebuild. Scroll normally to move through the paper. Hold Shift while scrolling to zoom, or use the minus and plus buttons; click the percentage to return to fit-to-width. The preview scales immediately and sharpens nearby pages in the background. You can select and copy the PDF's text directly from visible pages. Errors appear in the panel and the last successful preview for that note remains visible.
+4. Pause after editing for the preview to rebuild. Refresh forces a rebuild. Scroll normally to move through the paper. Hold Shift while scrolling to zoom, or use the minus and plus buttons; click the percentage to return to fit-to-width. The preview scales immediately and sharpens nearby pages in the background. You can select and copy the PDF's text and click internal links, including table-of-contents entries and cross-references, to jump within the preview. Use **Open PDF** for external web links. Errors appear in the panel and the last successful preview for that note remains visible.
 
 **Open PDF** opens a temporary snapshot of the current preview in the system's default PDF viewer. A snapshot does not update as you edit; open it again for a newer preview. Use **Export → PDF** or **Export → LaTeX** to save a permanent export. Scholar asks for a parent folder, then creates a new, uniquely named paper folder inside it. Each LaTeX export includes any Joplin image attachments it references in an `assets` folder. Compile the exported `.tex` from the folder containing the `.tex` file. Exports never overwrite an existing folder.
+
+**Export → Submission ZIP** creates an Overleaf-ready archive containing the generated `.tex`, local image assets, and the Springer class file when configured. Upload the ZIP as a new Overleaf project and select XeLaTeX. Other LaTeX packages and custom classes must be available in that environment. Citations are already rendered by Pandoc: this is not an editable BibTeX/BibLaTeX project or a guarantee of journal compliance. Check the output and the journal's requirements before submission.
+
+## Multi-note paper projects
+
+Keep the main paper in one Joplin note. In its Markdown editor, place the cursor where a section should appear, open **Project**, paste the other note's Joplin link or ID, and click **Insert note**. The note contains a visible marker like `{{include-note:0123456789abcdef0123456789abcdef}}`. Move markers to reorder sections. Preview and exports assemble the source notes in that order; the originals are never changed. Included notes may themselves include notes. Circular references and missing notes produce errors. The main note supplies document metadata; YAML at the start of included notes is omitted. Images in included notes must be available locally.
+
+The Cite picker currently lists targets in the main note, not included notes. Add labels and references in the relevant Markdown notes manually. Refresh the preview after changing an included note elsewhere. Project markers require Joplin to resolve note IDs; a plain Markdown export alone does not contain the included notes.
 
 Click **Detach** and then **Open Scholar window** in your browser to move the live preview and its controls into a separate, resizable window, for example on another monitor. Allow pop-ups for the local page if your browser blocks it. The preview continues to update after you edit or switch notes in Joplin. Click **Return to Joplin**, or close the preview window, to restore the panel. The temporary connection stays on your computer and closes when the preview closes; the browser window uses its own default colours rather than Joplin's theme. The first browser tab can be closed after the preview window opens.
 
@@ -21,7 +29,7 @@ Click **Detach** and then **Open Scholar window** in your browser to move the li
 
 Select a notebook and click **Example paper** in the Scholar panel. Scholar creates and opens a new note in that notebook, with a real image attachment. The paper explains and demonstrates authors, an abstract, contents lists, figures and tables, math and equation references, footnotes, citations, bibliography styles, the preview, and export. Explore its Markdown beside the PDF preview, then edit your copy. Clicking the button again creates another independent copy; existing notes are never overwritten. The example is also available as [Markdown](examples/joplin-scholar-example.md), its [image](examples/example-workflow.png), and a [sample PDF](examples/joplin-scholar-example.pdf). When using the Markdown outside the button, import the image as a Joplin attachment and replace its relative image path with Joplin's attachment link.
 
-The example includes inline reference records and an explicit empty `bibliography: []` in its YAML. Together these tell Scholar to use the embedded references regardless of the global bibliography setting, so Zotero is not required for the example. A working Pandoc and LaTeX installation is still required for the PDF preview. For your own papers, remove or change the embedded reference records and `bibliography` field when switching to a Zotero library or bibliography file.
+The example includes inline reference records and an explicit empty `bibliography: []` in its YAML. Those records make the example self-contained, so Zotero is not required to preview it. If you add a citation that is not embedded, Scholar can retrieve the missing reference from Zotero or a configured bibliography file. A working Pandoc and LaTeX installation is still required for the PDF preview.
 
 ## Document styles
 
@@ -174,7 +182,31 @@ Pandoc pipe tables can have a caption immediately before or after the table:
 Table: Observed values
 ```
 
-Put `[lof]` and `[lot]` on their own lines where you want the list of figures and list of tables. These lists include captioned figures and tables, and are separate from `[toc]`. Scholar renders them in the preview and PDF; an exported `.tex` file may require multiple LaTeX runs to populate them. Keep Pandoc syntax in the Markdown editor: Joplin's rich-text editor may change captions, list markers, and table formatting. Scholar does not yet provide automatic figure/table cross-references.
+Put `[lof]` and `[lot]` on their own lines where you want the list of figures and list of tables. These lists include captioned figures and tables, and are separate from `[toc]`. Scholar renders them in the preview and PDF; an exported `.tex` file may require multiple LaTeX runs to populate them. Keep Pandoc syntax in the Markdown editor: Joplin's rich-text editor may change captions, list markers, and table formatting.
+
+### Automatic references to figures, tables and sections
+
+To insert a reference without typing the syntax, place the cursor in Joplin's Markdown editor, click **Cite**, choose **Section**, **Figure**, or **Table**, and select an item from the list. Items are listed in their order in the note. Scholar adds a stable label when needed and inserts the reference at the cursor in one undoable change. Unavailable categories are disabled. If a section needs numbering, Scholar enables it in Document options; an explicit `numbersections: false` in YAML must be changed first. Unnumbered headings cannot be referenced by number. If an image or table has no caption, Scholar adds a placeholder caption: edit it to describe the item.
+
+You can also give each target a unique label and type a reference where its number should appear:
+
+```markdown
+See Figure \@ref(fig:growth), Table \@ref(tab:values), and Section \@ref(sec:results).
+
+# Results {#sec:results}
+
+![Growth over time](:/your-joplin-attachment-id){#fig:growth}
+
+| Year | Value |
+|------|------:|
+| 2024 | 10    |
+
+Table: Observed values {#tab:values}
+```
+
+Write the word “Figure”, “Table”, or “Section” yourself; `\@ref(...)` supplies the number. Add `{#fig:...}` after a standalone captioned image, `{#tab:...}` at the end of a table caption, and `{#sec:...}` after a heading. Use distinct labels containing letters, numbers, hyphens, underscores, colons or slashes. If the target is missing or a label is duplicated, Scholar reports an error in the preview. Figure labels require an image with a caption on its own line. Section references require numbered headings: enable **Section numbering** in **Document options**, or add `numbersections: true` to the note's YAML. Headings marked unnumbered or outside the selected numbering depth cannot be referenced by number.
+
+References update automatically in the preview and PDF when targets move. In Scholar's standard templates, the reference number is also a clickable link to its target. Exported LaTeX contains `\label` and `\ref` commands; run LaTeX at least twice to resolve the numbers. Custom LaTeX templates need to support internal hyperlinks, normally with `hyperref`. When a target already has a non-Scholar identifier, the picker preserves it and uses `\@ref(fig-id:...)`, `\@ref(tab-id:...)`, or `\@ref(sec-id:...)` as appropriate. As with other specialised Markdown, use Joplin's Markdown editor and check the preview after switching editors. This syntax is compatible with Scholar's existing bookdown-style equation references and does not require R or an extra Pandoc filter.
 
 LaTeX may move figures to a later page when they do not fit. If pending figures appear after the references, put `\clearpage` on its own line immediately before the references heading in the Markdown editor; LaTeX will place the waiting figures before starting the references on a new page.
 
@@ -182,10 +214,12 @@ LaTeX may move figures to a later page when they do not fit. If pending figures 
 
 1. Install [Better BibTeX for Zotero](https://retorque.re/zotero-better-bibtex/installation/) and keep Zotero open.
 2. In **Settings → Joplin Scholar → Bibliography source**, select **Zotero directly**. If the setting is **Automatic**, Scholar uses an existing bibliography file or note metadata first, then Zotero if neither is set.
-3. In the Scholar toolbar, open **Cite** and click **Choose from Zotero**. In Zotero’s picker, search and choose one or more sources; locators such as page numbers are supported. When the picker closes, paste the copied citation into your note. Add a `## References` heading at the end if you want to label the list.
-4. Scholar retrieves the cited items from Zotero locally and generates the reference list in the PDF. Choose a citation style from the visible **Citation style** dropdown. Click **Refresh** after editing records in Zotero.
+3. Place the cursor in Joplin's Markdown editor, open **Cite** in Scholar, and click **From Zotero**. In Zotero’s picker, search and choose one or more sources; locators such as page numbers are supported. Scholar inserts the citation at the cursor. Add a `## References` heading at the end if you want to label the list.
+4. Scholar retrieves the cited items from Zotero locally and generates the reference list in the PDF, including any references embedded in the note. Choose a citation style from the visible **Citation style** dropdown. Click **Refresh** after editing records in Zotero.
 
-The picker and reference lookup communicate with Zotero's Better BibTeX service on this computer. The picker copies the Pandoc citation to the clipboard rather than changing the note directly, so you choose exactly where to paste it. Cancelling leaves the clipboard unchanged. In direct mode, Scholar looks up the cited keys in My Library; a numeric library ID can be entered in settings to use one group library instead. Citations from multiple libraries in the same document and `nocite: @*` are not supported in direct mode; use a bibliography file for those cases. Joplin’s rich-text editor may alter Pandoc citation syntax, so check the resulting preview and consider using the Markdown editor for citations.
+The picker and reference lookup communicate with Zotero's Better BibTeX service on this computer. Cancelling does not change the note or clipboard. If the note or cursor changes while the Zotero picker is open, Scholar leaves the note untouched and offers the citation to copy instead. In direct mode, Scholar looks up the cited keys in My Library; a numeric library ID can be entered in settings to use one group library instead. Citations from multiple libraries in the same document and `nocite: @*` are not supported in direct mode; use a bibliography file for those cases. Joplin’s rich-text editor may alter Pandoc citation syntax, so use the Markdown editor to insert citations and cross-references.
+
+After changing an item in Zotero, use **Cite → Refresh references** to rebuild the preview. Scholar warns when it detects an escaped citation that Joplin's rich-text editor may have changed. It does not automatically rewrite the note or guarantee that every specialised Markdown construct survives switching editors; inspect the Markdown and keep a backup before switching.
 
 ## Academic references
 

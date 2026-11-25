@@ -1,13 +1,34 @@
 {
   "name": "joplin-plugin-scholar",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Live typeset preview and LaTeX export for Joplin",
   "author": "Werner Hertzog",
   "homepage": "https://github.com/wernerhertzog/joplin-scholar#readme",
-  "repository": { "type": "git", "url": "git+https://github.com/wernerhertzog/joplin-scholar.git" },
-  "bugs": { "url": "https://github.com/wernerhertzog/joplin-scholar/issues" },
-  "keywords": ["joplin-plugin", "academic-writing", "pandoc", "latex", "zotero"],
-  "files": ["publish/*.jpl", "publish/*.json", "examples/*.md", "examples/*.png", "examples/*.pdf", "assets/*.svg", "assets/*.png", "README.md", "LICENSE"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wernerhertzog/joplin-scholar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wernerhertzog/joplin-scholar/issues"
+  },
+  "keywords": [
+    "joplin-plugin",
+    "academic-writing",
+    "pandoc",
+    "latex",
+    "zotero"
+  ],
+  "files": [
+    "publish/*.jpl",
+    "publish/*.json",
+    "examples/*.md",
+    "examples/*.png",
+    "examples/*.pdf",
+    "assets/*.svg",
+    "assets/*.png",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node scripts/build.js",
     "test": "npm run build && node --test",
@@ -18,6 +39,8 @@
   },
   "license": "MIT",
   "dependencies": {
+    "fflate": "^0.8.3",
+    "markdown-it": "^15.0.3",
     "pdfjs-dist": "4.10.38",
     "yaml": "^2.9.1"
   },

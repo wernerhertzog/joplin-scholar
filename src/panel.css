@@ -1,18 +1,22 @@
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--joplin-color, #30343b); background: var(--joplin-background-color, #f6f7f9); font: 13px system-ui, sans-serif; }
 .app { height: 100vh; display: flex; flex-direction: column; padding: 8px; gap: 6px; }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.toolbar { position: relative; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
 h1 { margin: 0 5px 0 0; font-size: 14px; line-height: 1.2; display: inline-flex; align-items: center; gap: 5px; }
 .brand-icon { display: block; width: 18px; height: 18px; flex: none; }
 .toolbar button { padding: 4px 5px; font-size: 12px; }
-.export-menu { position: relative; font-size: 12px; }
-.export-menu summary { list-style: none; cursor: pointer; border: 1px solid var(--joplin-divider-color, #aab1ba); border-radius: 5px; padding: 4px 6px; }
-.export-menu summary::-webkit-details-marker { display: none; }
-.export-menu summary::after { content: ' ▾'; }
-.export-menu summary:hover { background: rgba(127,127,127,.16); }
-.export-menu summary:focus-visible { outline: 2px solid #5599e9; outline-offset: 2px; }
+.export-menu, .cite-menu { position: relative; font-size: 12px; }
+.export-menu summary, .cite-menu summary { list-style: none; cursor: pointer; border: 1px solid var(--joplin-divider-color, #aab1ba); border-radius: 5px; padding: 4px 6px; }
+.export-menu summary::-webkit-details-marker, .cite-menu summary::-webkit-details-marker { display: none; }
+.export-menu summary::after, .cite-menu summary::after { content: ' ▾'; }
+.export-menu summary:hover, .cite-menu summary:hover { background: rgba(127,127,127,.16); }
+.export-menu summary:focus-visible, .cite-menu summary:focus-visible { outline: 2px solid #5599e9; outline-offset: 2px; }
 .export-options { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 110px; padding: 4px; display: grid; gap: 2px; background: var(--joplin-background-color, #fff); border: 1px solid var(--joplin-divider-color, #aab1ba); border-radius: 5px; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
 .toolbar .export-options button { text-align: left; border: 0; padding: 6px 8px; }
+.cite-options { position: absolute; z-index: 11; top: calc(100% + 4px); left: 0; width: min(300px, calc(100vw - 20px)); max-height: min(60vh, 420px); overflow: auto; padding: 8px; display: grid; gap: 7px; background: var(--joplin-background-color, #fff); border: 1px solid var(--joplin-divider-color, #aab1ba); border-radius: 5px; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
+.citation-kinds { display: grid; gap: 2px; }
+.toolbar .citation-kinds button { text-align: left; padding: 6px 8px; }
+.toolbar .citation-kinds button[aria-pressed="true"] { background: rgba(127,127,127,.2); }
 .toolbar-separator { width: 1px; align-self: stretch; background: var(--joplin-divider-color, #aab1ba); margin: 3px 1px; }
 .tool-toggle[aria-expanded="true"] { background: rgba(127,127,127,.2); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -55,8 +59,15 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px ui-monospace, m
 #preview .textLayer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
 #preview .textLayer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
 #preview .textLayer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
+#preview .pdf-link-layer { position: absolute; inset: 0; pointer-events: none; }
+#preview .pdf-internal-link { position: absolute; display: block; pointer-events: auto; cursor: pointer; border-radius: 2px; }
+#preview .pdf-internal-link:hover { background: rgba(0, 90, 255, .12); }
+#preview .pdf-internal-link:focus-visible { outline: 2px solid #5599e9; outline-offset: 2px; }
 .hiddenCanvasElement { position: absolute; width: 0; height: 0; display: none; }
 #placeholder { margin: auto; text-align: center; opacity: .6; max-width: 20em; }
 
 .citation-result { display: block; white-space: pre-wrap; overflow-wrap: anywhere; padding: 6px; background: rgba(127,127,127,.12); border-radius: 4px; }
 .citation-result[hidden] { display: none; }
+.citation-targets { display: grid; gap: 3px; max-height: 150px; overflow: auto; }
+.citation-targets[hidden] { display: none; }
+.citation-targets button { text-align: left; overflow-wrap: anywhere; }

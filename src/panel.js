@@ -20,6 +20,7 @@ let styleNoteId = null, previewStatus = 'idle';
 const send = message => webviewApi.postMessage(message);
 const toolToggles = [...document.querySelectorAll('.tool-toggle')];
 const exportMenu = document.querySelector('#export-menu');
+const citeMenu = document.querySelector('#cite-menu');
 function openTool(selected) {
   for (const button of toolToggles) {
     const open = button === selected;
@@ -27,9 +28,10 @@ function openTool(selected) {
     document.getElementById(button.getAttribute('aria-controls')).hidden = !open;
   }
 }
-for (const button of toolToggles) button.addEventListener('click', () => openTool(button.getAttribute('aria-expanded') === 'true' ? null : button));
+for (const button of toolToggles) button.addEventListener('click', () => { citeMenu.open = false; openTool(button.getAttribute('aria-expanded') === 'true' ? null : button); });
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
+  if (citeMenu.open) { citeMenu.open = false; citeMenu.querySelector('summary').focus(); return; }
   if (exportMenu.open) { exportMenu.open = false; exportMenu.querySelector('summary').focus(); return; }
   const open = toolToggles.find(button => button.getAttribute('aria-expanded') === 'true');
   if (open) { openTool(null); open.focus(); }
@@ -51,9 +53,11 @@ detachButton.addEventListener('click', () => {
   if (window.scholarDetached) window.scholarReturn();
   else send({type:'detach'});
 });
-document.addEventListener('click', event => { if (exportMenu.open && !exportMenu.contains(event.target)) exportMenu.open = false; });
+document.addEventListener('click', event => { if (exportMenu.open && !exportMenu.contains(event.target)) exportMenu.open = false; if (citeMenu.open && !citeMenu.contains(event.target)) citeMenu.open = false; });
 document.querySelector('#export-pdf').addEventListener('click', () => { exportMenu.open = false; send({ type: 'export', format: 'pdf' }); });
 document.querySelector('#export-tex').addEventListener('click', () => { exportMenu.open = false; send({ type: 'export', format: 'tex' }); });
+document.querySelector('#export-bundle').addEventListener('click', () => { exportMenu.open = false; send({ type:'export', format:'bundle' }); });
+document.querySelector('#project-insert').addEventListener('click', () => { document.querySelector('#project-status').textContent='Adding note…'; send({type:'insertProjectNote',value:document.querySelector('#project-note').value}); });
 function readAuthors() {
   return [...authorsList.querySelectorAll('.author-row')].map(row => ({
     ...row.authorData,
@@ -129,7 +133,43 @@ reloadMetadataButton.addEventListener('click', () => {
   if (authorDrafts.has(authorNoteId) && !window.confirm('Discard unsaved metadata changes and reload from the note?')) return;
   authorDrafts.delete(authorNoteId); metadataBase = null; setMetadataEnabled(false); authorsStatus.textContent = 'Loading metadata…'; send({type:'reloadMetadata'});
 });
-document.querySelector('#pick-citation').addEventListener('click', () => send({type:'pickCitation'}));
+const citationStatus = document.querySelector('#citation-status');
+const citationList = document.querySelector('#citation-targets');
+const citationResult = document.querySelector('#citation-result');
+const copyCitationResult = document.querySelector('#copy-citation-result');
+const citationKinds = [...document.querySelectorAll('[data-citation-kind]')];
+let citationTargets = [], citationNoteId = null, citationRevision = null, citationKind = null, citationEditorError = '', citationRefreshTimer = null;
+function positionCiteMenu() {
+  if (!citeMenu.open) return;
+  const popup = citeMenu.querySelector('.cite-options');
+  popup.style.left = '0px';
+  const rect = popup.getBoundingClientRect();
+  const shift = Math.min(0, window.innerWidth - 8 - rect.right) + Math.max(0, 8 - rect.left);
+  popup.style.left = `${shift}px`;
+}
+citeMenu.addEventListener('toggle', () => { if (citeMenu.open) { exportMenu.open = false; openTool(null); positionCiteMenu(); citationStatus.textContent = 'Finding items in this paper…'; send({type:'loadCitationTargets'}); } });
+window.addEventListener('resize', positionCiteMenu);
+function renderCitationTargets() {
+  for (const button of citationKinds) button.setAttribute('aria-pressed', String(button.dataset.citationKind === citationKind));
+  citationList.replaceChildren();
+  citationList.hidden = !citationKind;
+  if (!citationKind) return;
+  for (const target of citationTargets.filter(item => item.kind === citationKind)) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = target.title; button.disabled = !!target.unnumbered;
+    if (target.unnumbered) button.title = 'Unnumbered headings cannot be referenced by number.';
+    button.addEventListener('click', () => {
+      for (const item of citationList.querySelectorAll('button')) item.disabled = true;
+      citationStatus.textContent = 'Inserting reference…';
+      send({type:'insertCrossReference', noteId:citationNoteId, revision:citationRevision, kind:target.kind, index:target.index});
+    });
+    citationList.append(button);
+  }
+}
+for (const button of citationKinds) button.addEventListener('click', () => { citationKind = button.dataset.citationKind; renderCitationTargets(); citationStatus.textContent = citationEditorError || 'Choose an item to insert its reference at the cursor.'; });
+document.querySelector('#pick-citation').addEventListener('click', () => { citationResult.hidden = true; copyCitationResult.hidden = true; send({type:'pickCitation'}); });
+document.querySelector('#refresh-zotero').addEventListener('click', () => { citationStatus.textContent='Refreshing references…'; send({type:'refresh'}); });
+copyCitationResult.addEventListener('click', () => send({type:'copyCitationResult', citation:citationResult.textContent}));
 document.querySelector('#copy-footnote').addEventListener('click', () => { footnoteStatus.textContent = 'Preparing footnote…'; send({ type:'copyFootnote', text:footnoteText.value }); });
 const styleSelect = document.querySelector('#citation-style');
 const styleStatus = document.querySelector('#style-status');
@@ -187,9 +227,11 @@ new ResizeObserver(() => {
 webviewApi.onMessage(event => {
   const message = event && event.message && typeof event.message === 'object' ? event.message : event;
   if (!message || typeof message !== 'object') return;
+  if (message.type === 'writingWarning') { const warning=document.querySelector('#writing-warning'); warning.textContent=message.message || ''; warning.hidden=!message.message; }
+  if (message.type === 'projectInserted' || message.type === 'projectError') document.querySelector('#project-status').textContent=message.message;
   if (message.type === 'exampleCreating') { exampleButton.disabled = true; exampleStatus.hidden = false; exampleStatus.textContent = 'Creating example paper…'; }
   if (message.type === 'exampleCreated' || message.type === 'exampleError') { exampleButton.disabled = false; exampleStatus.hidden = false; exampleStatus.textContent = message.message; }
-  if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; documentStyleNoteId = null; documentStyleSelect.disabled = true; documentStyleStatus.hidden = true; documentOptionsNoteId = null; for (const input of Object.values(documentOptionInputs)) input.disabled = true; documentOptionsStatus.textContent = 'Loading document options…'; }
+  if (message.type === 'paperChanged') { styleNoteId = null; styleSelect.disabled = true; styleStatus.hidden = true; documentStyleNoteId = null; documentStyleSelect.disabled = true; documentStyleStatus.hidden = true; documentOptionsNoteId = null; for (const input of Object.values(documentOptionInputs)) input.disabled = true; documentOptionsStatus.textContent = 'Loading document options…'; citationKind = null; citationNoteId = null; citationTargets = []; for (const button of citationKinds) button.disabled = true; renderCitationTargets(); if (citeMenu.open) send({type:'loadCitationTargets'}); }
   if (message.type === 'documentOptions') {
     documentOptionsNoteId = message.noteId;
     for (const key of documentOptionsKeys) { documentOptionInputs[key].value = message.value[key]; documentOptionInputs[key].disabled = !message.noteId; }
@@ -243,20 +285,29 @@ webviewApi.onMessage(event => {
   if (message.type === 'metadataSaved') { const draft = authorDrafts.get(message.noteId); if (draft && draft.revision === message.revision) authorDrafts.delete(message.noteId); if (authorNoteId === message.noteId) { setMetadataEnabled(true); authorsStatus.textContent = message.warning || 'Metadata saved in the note.'; } }
   if (message.type === 'metadataSaveError' && authorNoteId === message.noteId) { setMetadataEnabled(true); authorsStatus.textContent = message.message; }
   if (message.type === 'metadataNotice' && authorNoteId === message.noteId) authorsStatus.textContent = message.message;
-  if (message.type === 'citationPicking') { document.querySelector('#pick-citation').disabled = true; document.querySelector('#citation-result').hidden = true; document.querySelector('#citation-status').textContent = 'Choose a source in Zotero…'; }
-  if (message.type === 'citationCancelled') { document.querySelector('#pick-citation').disabled = false; document.querySelector('#citation-status').textContent = 'No citation selected.'; }
-  if (message.type === 'citationCopied') { document.querySelector('#pick-citation').disabled = false; document.querySelector('#citation-status').textContent = 'Copied. Paste into your note. Keep Zotero open to generate references, or use a configured bibliography file.'; const result = document.querySelector('#citation-result'); result.textContent = message.citation; result.hidden = false; }
-  if (message.type === 'citationError') { document.querySelector('#pick-citation').disabled = false; document.querySelector('#citation-status').textContent = `No citation copied. ${message.message}`; }
+  if (message.type === 'citationTargets') {
+    citationNoteId = message.noteId; citationRevision = message.revision; citationTargets = message.targets || []; citationEditorError = message.editorError || '';
+    for (const button of citationKinds) button.disabled = !citationTargets.some(target => target.kind === button.dataset.citationKind);
+    if (citationKind && !citationTargets.some(target => target.kind === citationKind)) citationKind = null;
+    renderCitationTargets();
+    citationStatus.textContent = !citationNoteId ? 'Select a note first.' : citationEditorError || (citationKind ? 'Choose an item to insert its reference at the cursor.' : 'Choose a source to insert a reference.');
+  }
+  if (message.type === 'citationTargetsDirty' && citeMenu.open) { clearTimeout(citationRefreshTimer); citationRefreshTimer = setTimeout(() => { if (citeMenu.open) send({type:'loadCitationTargets'}); }, 350); }
+  if (message.type === 'citationPicking') { document.querySelector('#pick-citation').disabled = true; citationResult.hidden = true; copyCitationResult.hidden = true; citationStatus.textContent = 'Choose a source in Zotero…'; }
+  if (message.type === 'citationCancelled') { document.querySelector('#pick-citation').disabled = false; citationStatus.textContent = 'No citation selected.'; }
+  if (message.type === 'citationInserted') { document.querySelector('#pick-citation').disabled = false; citationStatus.textContent = message.message; citationKind = null; renderCitationTargets(); }
+  if (message.type === 'citationCopied') { document.querySelector('#pick-citation').disabled = false; citationStatus.textContent = 'Copied. Paste the citation into your note.'; }
+  if (message.type === 'citationError') { document.querySelector('#pick-citation').disabled = false; citationStatus.textContent = message.message; if (message.citation) { citationResult.textContent = message.citation; citationResult.hidden = false; copyCitationResult.hidden = false; } }
   if (message.type === 'footnoteCopied') footnoteStatus.textContent = 'Copied. Paste it into the note where the number should appear.';
   if (message.type === 'footnoteError') footnoteStatus.textContent = message.message;
   if (message.type === 'clear') { previewStatus = 'idle'; document.querySelector('#open-pdf').disabled = true; pdf.clear(); clearError(); status.textContent = message.message || 'Preparing preview…'; }
   if (message.type === 'waiting') { previewStatus = 'waiting'; pdf.cancelPendingLoad(); clearError(); status.textContent = 'Waiting for typing to pause…'; }
   if (message.type === 'building') { previewStatus = 'building'; pdf.cancelPendingLoad(); clearError(); status.textContent = 'Building PDF preview…'; }
-  if (message.type === 'pdf') { previewStatus = 'rendering'; document.querySelector('#open-pdf').disabled = false; clearError(); status.textContent = 'Rendering preview…'; void pdf.load(message.base64); }
+  if (message.type === 'pdf') { if (citationStatus.textContent === 'Refreshing references…') citationStatus.textContent = 'References refreshed.'; previewStatus = 'rendering'; document.querySelector('#open-pdf').disabled = false; clearError(); status.textContent = 'Rendering preview…'; void pdf.load(message.base64); }
   if (message.type === 'pdfOpened') status.textContent = 'Opened a PDF snapshot.';
   if (message.type === 'openPdfError') { errorText.textContent = message.message; errors.hidden = false; errors.open = true; }
   if (message.type === 'exporting') status.textContent = `Exporting ${message.format === 'tex' ? 'LaTeX' : 'PDF'}…`;
   if (message.type === 'exported') { clearError(); status.textContent = `Saved to ${message.file}`; }
-  if (message.type === 'error') { status.textContent = 'Could not build the paper. The last preview is shown if available.'; errorText.textContent = message.message; errors.hidden = false; errors.open = true; }
+  if (message.type === 'error') { if (citationStatus.textContent === 'Refreshing references…') citationStatus.textContent = `Could not refresh references. ${message.message}`; status.textContent = 'Could not build the paper. The last preview is shown if available.'; errorText.textContent = message.message; errors.hidden = false; errors.open = true; }
 });
 send({ type: 'ready' });

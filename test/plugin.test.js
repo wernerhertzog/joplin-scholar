@@ -41,7 +41,11 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     settings: { registerSection: async()=>{}, registerSettings: async()=>{}, values: async()=>({ pandoc:fake, engine:'xelatex', delay:500 }), onChange: async fn=>{callbacks.settings=fn;} },
     views: { panels: { create:async()=> 'p', setHtml:async(_,html)=>{panelHtml=html;}, addScript:async()=>{}, postMessage:(_,m)=>sent.push(m), onMessage:async(_,fn)=>{callbacks.message=fn;}, visible:async()=>panelVisible, show:async(_,value)=>{panelVisible=value;} }, menuItems: {create:async()=>{}}, toolbarButtons:{create:async(...args)=>toolbarButtons.push(args)}, dialogs: {showOpenDialog:async()=>[root]} },
     window:{loadChromeCssFile:async file=>cssFiles.push(file)},
-    commands: {register:async command=>{commands[command.name]=command;}, execute:async(command,opts)=>{if(command==='editor.execCommand'){const [expected,oldHead,newHead]=opts.args;if(note.body!==expected)return {ok:false,reason:'changed'};note.body=newHead+note.body.slice(oldHead.length);return {ok:true};}}}, data:{ userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
+    commands: {register:async command=>{commands[command.name]=command;}, execute:async(command,opts)=>{if(command==='editor.execCommand'){
+      if(opts.name==='scholar__citationSnapshot') return {ok:true,text:note.body,head:note.body.length};
+      if(opts.name==='scholar__insertCitation') {const [expected,head,reference,change]=opts.args;if(note.body!==expected || note.body.length!==head)return {ok:false,reason:'changed'};const edits=[{from:head,to:head,insert:reference},...(change?[change]:[])].sort((a,b)=>b.from-a.from);for(const edit of edits)note.body=note.body.slice(0,edit.from)+edit.insert+note.body.slice(edit.to);return {ok:true};}
+      const [expected,oldHead,newHead]=opts.args;if(note.body!==expected)return {ok:false,reason:'changed'};note.body=newHead+note.body.slice(oldHead.length);return {ok:true};
+    }}}, data:{ get:async([,id])=>({id,title:'Chapter',body:'# Chapter'}), userDataGet:async(_t,id,key)=>storeFor(key).get(id), userDataSet:async(_t,id,key,value)=>storeFor(key).set(id,value) }, clipboard:{writeText:async value=>{clipboard=value;}},
     workspace:{ selectedNote:async()=>({...note}), onNoteChange:async fn=>{callbacks.change=fn;}, onNoteSelectionChange:async fn=>{callbacks.selection=fn;} },
   };
   try {
@@ -67,6 +71,23 @@ test('plugin rebuilds on edits, avoids stale note previews, and exports the sele
     assert.ok(sent.some(m=>m.type==='metadata' && m.noteId==='b' && m.metadata.fields.title==='Second' && m.metadata.titleFromNote));
     const previews = sent.filter(m=>m.type==='pdf');
     assert.equal(previews.length, 1); assert.equal(previews[0].title, 'Second');
+    note.body='# Results\n\n![Growth](test.png)\n\nText: ';
+    await callbacks.message({type:'loadCitationTargets'});
+    const picker=sent.findLast(m=>m.type==='citationTargets');
+    assert.deepEqual(picker.targets.map(t=>t.kind),['sec','fig']);
+    await callbacks.message({type:'insertCrossReference', noteId:'b',revision:picker.revision,kind:'fig',index:picker.targets[1].index});
+    assert.match(note.body,/!\[Growth\]\(test.png\)\{#fig:figure-1\}/);
+    assert.match(note.body,/Text: Figure \\@ref\(fig:figure-1\)/);
+    const sectionPicker=sent.findLast(m=>m.type==='citationTargets');
+    await callbacks.message({type:'insertCrossReference', noteId:'b',revision:sectionPicker.revision,kind:'sec',index:sectionPicker.targets[0].index});
+    assert.match(note.body,/# Results \{#sec:section-1\}/);
+    assert.match(note.body,/Section \\@ref\(sec:section-1\)/);
+    assert.equal(documentOptionsData.get('b').sections,'on');
+    note.body='Different';
+    await callbacks.message({type:'insertProjectNote',value:'[Chapter](:/0123456789abcdef0123456789abcdef)'});
+    assert.match(note.body,/\{\{include-note:0123456789abcdef0123456789abcdef\}\}/);
+    assert.ok(sent.some(m=>m.type==='projectInserted'));
+    note.body='Different';
     if (process.platform !== 'win32') {
       await callbacks.message({type:'openPdf'});
       openedSnapshot = await fs.readFile(recordFile, 'utf8');

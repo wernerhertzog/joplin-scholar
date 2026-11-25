@@ -1,11 +1,13 @@
 'use strict';
-const { compile, clean, exportResult } = require('./compiler');
+const { compile, clean, exportResult, exportBundle } = require('./compiler');
 const { AUTHOR_KEY, normalizeAuthors, markdownAuthors, markdownMetadata } = require('./paper-data');
 const { MIGRATED_KEY, inspectMetadata, updateMetadata, splitFrontMatter } = require('./metadata-editor');
 const { STYLE_KEY, labels: styleLabels, styleId } = require('./citation-styles');
-const { DOCUMENT_STYLE_KEY, documentStyles, documentStyleId, layoutOverrides } = require('./document-styles');
+const { DOCUMENT_STYLE_KEY, documentStyles, documentStyleId, layoutOverrides, layoutDefaults } = require('./document-styles');
 const { DOCUMENT_OPTIONS_KEY, normalizeDocumentOptions } = require('./document-options');
-const { copyCitation } = require('./zotero');
+const { chooseCitation } = require('./zotero');
+const { targetList } = require('./citation-targets');
+const { writingWarning } = require('./writing-diagnostics');
 const { openPdfSnapshot } = require('./open-pdf');
 const { createDetachedPreview } = require('./detached-preview');
 const fs = require('fs/promises');
@@ -34,15 +36,18 @@ joplin.plugins.register({ onStart: async function() {
       <button id="refresh" type="button" title="Rebuild preview" aria-label="Rebuild preview">↻</button>
       <button id="open-pdf" type="button" title="Open the current preview in your default PDF viewer" disabled>Open PDF</button>
       <button id="detach-preview" type="button" title="Open Scholar in a separate window">Detach</button>
-      <details class="export-menu" id="export-menu"><summary>Export</summary><div class="export-options"><button id="export-pdf" type="button">PDF</button><button id="export-tex" type="button">LaTeX</button></div></details>
+      <details class="export-menu" id="export-menu"><summary>Export</summary><div class="export-options"><button id="export-pdf" type="button">PDF</button><button id="export-tex" type="button">LaTeX</button><button id="export-bundle" type="button">Submission ZIP</button></div></details>
       <button id="create-example" type="button" title="Create an example paper in the selected notebook">Example paper</button>
       <span class="toolbar-separator" aria-hidden="true"></span>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="document-options-panel">Document options</button>
+      <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="project-panel">Project</button>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="metadata-panel">Document metadata</button>
-      <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="citation-panel">Cite</button>
+      <details class="cite-menu" id="cite-menu"><summary>Cite</summary><div class="cite-options" aria-label="Add a citation"><p class="hint">Place the cursor in the Markdown editor, then choose a source.</p><div class="citation-kinds"><button id="pick-citation" type="button">From Zotero</button><button data-citation-kind="sec" type="button" disabled>Section</button><button data-citation-kind="fig" type="button" disabled>Figure</button><button data-citation-kind="tab" type="button" disabled>Table</button></div><div id="citation-targets" class="citation-targets" hidden></div><button id="refresh-zotero" type="button">Refresh references</button><p id="citation-status" class="hint" role="status">Choose a source to insert a reference.</p><code id="citation-result" class="citation-result" hidden></code><button id="copy-citation-result" type="button" hidden>Copy citation</button></div></details>
       <button class="tool-toggle" type="button" aria-expanded="false" aria-controls="footnote-panel">Footnote</button>
     </header>
     <p id="example-status" class="hint" role="status" aria-live="polite" hidden></p>
+    <p id="writing-warning" class="hint" role="status" hidden></p>
+    <section class="paper-controls" id="project-panel" aria-label="Paper project" hidden><div class="form-inner"><p class="hint">Copy a Joplin note link, then insert it at the desired position. Included notes stay separate and appear in this paper in order.</p><label for="project-note">Joplin note link or ID</label><input id="project-note" type="text" placeholder=":/note-id"><button id="project-insert" type="button">Insert note</button><p id="project-status" class="hint" role="status">Use the Markdown editor to insert a note.</p></div></section>
     <section class="paper-controls" id="document-options-panel" aria-label="Document options" hidden><div class="form-inner document-options">
       <label>Line numbers <select id="option-lineNumbers" disabled><option value="default">Style default</option><option value="on">Continuous</option><option value="off">Off</option></select></label>
       <label>Affiliations <select id="option-affiliations" disabled><option value="default">Style default</option><option value="below">Below authors</option><option value="end">End of paper</option></select></label>
@@ -58,13 +63,12 @@ joplin.plugins.register({ onStart: async function() {
       <details><summary>Full YAML (all metadata fields)</summary><p class="hint">Edit or add any YAML metadata, including abstracts, keywords, references and custom fields. Save changes to update the note.</p><label for="metadata-yaml">YAML metadata</label><textarea id="metadata-yaml" rows="10" spellcheck="false" disabled></textarea></details>
       <div class="actions"><button id="save-metadata" type="button" disabled>Save metadata</button><button id="reload-metadata" type="button" disabled>Reload metadata</button></div><p id="authors-status" class="hint" role="status">Select a note.</p>
     </div></section>
-    <section class="paper-controls" id="citation-panel" aria-label="Add a citation" hidden><div class="form-inner"><p class="hint">Open Zotero’s picker, then paste the citation into your note. Requires Zotero with Better BibTeX.</p><button id="pick-citation" type="button">Choose from Zotero</button><p id="citation-status" class="hint" role="status">Scholar can retrieve references directly from Zotero, or use a bibliography file.</p><code id="citation-result" class="citation-result" hidden></code></div></section>
     <section class="paper-controls" id="footnote-panel" aria-label="Add a footnote" hidden><div class="form-inner"><label for="footnote-text">Footnote text</label><textarea id="footnote-text" rows="2" placeholder="Type the footnote here"></textarea><button id="copy-footnote" type="button">Copy footnote</button><p id="footnote-status" class="hint" role="status">Paste it into the note where the number should appear. In Markdown you can also use [^1] and a matching [^1]: definition.</p></div></section>
     <div class="status-row"><div class="style-control"><label for="document-style">Document style</label><select id="document-style" aria-describedby="document-style-status" disabled>${Object.entries(documentStyles).map(([id, style]) => `<option value="${id}">${style.label}</option>`).join('')}</select></div><div class="style-control"><label for="citation-style">Citation style</label><select id="citation-style" aria-describedby="style-status" disabled><option value="default">Default / configured CSL</option>${Object.entries(styleLabels).map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div><p id="status" role="status" aria-live="polite">Select a note to begin.</p><div class="zoom" aria-label="Preview zoom"><button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button><button id="zoom-fit" type="button" title="Fit to width" aria-label="Fit to width">100%</button><button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button></div></div><p id="document-style-status" class="hint" role="status" hidden></p><p id="style-status" class="hint" role="status" hidden></p><details id="errors" hidden><summary>Show details</summary><pre id="error-text"></pre></details><div id="preview" tabindex="0" aria-label="PDF preview. Scroll to move through the paper; hold Shift and scroll to zoom." title="Scroll through the paper; hold Shift while scrolling to zoom"><div id="placeholder">Your typeset paper will appear here.</div></div></main>`;
   await joplin.views.panels.setHtml(panel, panelHtml);
   let detached = null;
   const send = message => { joplin.views.panels.postMessage(panel, message); detached?.send(message); };
-  let generation = 0, timer = null, compiling = false, requested = false, selectedId = null, lastPdf = null, webviewReady = false, authorLoadId = 0, authorView = null, choosingCitation = false, creatingExample = false, openingDetached = false, styleLoadId = 0, documentStyleLoadId = 0, documentOptionsLoadId = 0;
+  let generation = 0, timer = null, compiling = false, requested = false, selectedId = null, lastPdf = null, webviewReady = false, authorLoadId = 0, authorView = null, choosingCitation = false, creatingExample = false, openingDetached = false, styleLoadId = 0, documentStyleLoadId = 0, documentOptionsLoadId = 0, citationLoadId = 0, citationView = null;
   async function options() { const o = await joplin.settings.values(['pandoc', 'engine', 'bibliographySource', 'bibliography', 'zoteroLibrary', 'csl', 'template', 'springerClass', 'delay']); for (const k of ['pandoc','engine','bibliographySource','bibliography','zoteroLibrary','csl','template','springerClass']) o[k] = String(o[k] || '').trim(); return o; }
   async function authorsFor(noteId) { if (await joplin.data.userDataGet(1, noteId, MIGRATED_KEY)) return []; return normalizeAuthors((await joplin.data.userDataGet(1, noteId, AUTHOR_KEY)) || []); }
   async function styleFor(noteId) { const value = await joplin.data.userDataGet(1, noteId, STYLE_KEY); return styleId(value) || 'default'; }
@@ -123,6 +127,36 @@ joplin.plugins.register({ onStart: async function() {
       }
     } catch (error) { if (loadId === authorLoadId) { authorView = null; send({type:'metadataError', message:`Could not load metadata: ${error.message}`}); } }
   }
+  async function citationSnapshot() {
+    let result;
+    try { result = await joplin.commands.execute('editor.execCommand', {name:'scholar__citationSnapshot'}); }
+    catch (_) { throw new Error('Switch to Joplin’s Markdown editor to insert citations and cross-references.'); }
+    if (!result || typeof result !== 'object') throw new Error('Switch to Joplin’s Markdown editor to insert citations and cross-references.');
+    if (!result.ok) throw new Error(result.reason === 'readonly' ? 'This note is read-only.' : 'Switch to Joplin’s Markdown editor to insert citations and cross-references.');
+    if (typeof result.text !== 'string' || !Number.isInteger(result.head)) throw new Error('Could not read the current editor position.');
+    return result;
+  }
+  async function loadCitationTargets() {
+    const loadId = ++citationLoadId;
+    try {
+      const note = await joplin.workspace.selectedNote();
+      if (!note) { if (loadId === citationLoadId) { citationView = null; send({type:'citationTargets', noteId:null, targets:[]}); } return; }
+      let snapshot, editorError = '';
+      try { snapshot = await citationSnapshot(); }
+      catch (error) { snapshot = {text:note.body || '', head:0}; editorError = error.message; }
+      const targets = targetList(snapshot.text);
+      if (loadId !== citationLoadId || (await joplin.workspace.selectedNote())?.id !== note.id) return;
+      citationView = {noteId:note.id, text:snapshot.text, targets, revision:loadId};
+      send({type:'citationTargets', noteId:note.id, revision:loadId, editorError, targets:targets.map(({kind,title,index,unnumbered})=>({kind,title,index,unnumbered}))});
+    } catch (error) { if (loadId === citationLoadId) { citationView = null; send({type:'citationError', message:error.message}); } }
+  }
+  async function insertCitation(snapshot, reference, change) {
+    let result;
+    try { result = await joplin.commands.execute('editor.execCommand', {name:'scholar__insertCitation', args:[snapshot.text,snapshot.head,reference,change || null]}); }
+    catch (_) { throw new Error('Switch to Joplin’s Markdown editor before inserting a citation.'); }
+    if (!result || typeof result !== 'object') throw new Error('Switch to Joplin’s Markdown editor before inserting a citation.');
+    if (!result.ok) throw new Error(result.reason === 'overlap' ? 'Place the cursor where the reference should go, outside the selected target.' : result.reason === 'readonly' ? 'This note is read-only.' : 'The note or cursor changed. Choose the reference again.');
+  }
   function schedule(immediate = false, selectionChanged = false) {
     generation++; const scheduledVersion = generation; clearTimeout(timer);
     if (selectionChanged) { selectedId = null; lastPdf = null; send({ type: 'clear' }); }
@@ -142,6 +176,7 @@ joplin.plugins.register({ onStart: async function() {
         if (version !== generation) continue;
         if (!note) { selectedId = null; lastPdf = null; send({ type: 'clear', message: 'Select a note to begin.' }); continue; }
         if (selectedId !== note.id) { selectedId = note.id; lastPdf = null; send({ type: 'clear' }); }
+        send({type:'writingWarning', message:writingWarning(note.body)});
         send({ type: 'building', title: note.title });
         let result;
         try {
@@ -172,8 +207,8 @@ joplin.plugins.register({ onStart: async function() {
         config.citationStyle = await styleFor(note.id);
         config.documentStyle = await documentStyleFor(note.id);
         config.documentOptions = await documentOptionsFor(note.id);
-        result = await compile(note, joplin.data, config, format);
-        const file = await exportResult(result, dirs[0]);
+        result = await compile(note, joplin.data, config, format === 'bundle' ? 'tex' : format);
+        const file = format === 'bundle' ? await exportBundle(result, dirs[0]) : await exportResult(result, dirs[0]);
         send({ type: 'exported', file });
       } finally { await clean(result); }
     } catch (error) { send({ type: 'error', message: error.message }); }
@@ -259,8 +294,57 @@ joplin.plugins.register({ onStart: async function() {
         send({type:'pdfOpened'});
       } catch (error) { send({type:'openPdfError', message:`Could not open the PDF. ${error.message}`}); }
     }
-    if (message.type === 'export' && ['pdf', 'tex'].includes(message.format)) await doExport(message.format);
+    if (message.type === 'export' && ['pdf', 'tex', 'bundle'].includes(message.format)) await doExport(message.format);
+    if (message.type === 'insertProjectNote') {
+      try {
+        const note=await joplin.workspace.selectedNote(), match=String(message.value || '').trim().match(/(?:^|:\/|[?&]id=)([a-f0-9]{32})(?:$|[&#)\s])/i);
+        if (!note) throw new Error('Select a paper note first.');
+        if (!match) throw new Error('Paste a Joplin note link or 32-character note ID.');
+        const id=match[1].toLowerCase();
+        if (id===note.id) throw new Error('A paper cannot include itself.');
+        const child=await joplin.data.get(['notes',id],{fields:['id','title']});
+        if (!child?.id) throw new Error('That note could not be found.');
+        const snapshot=await citationSnapshot();
+        if ((await joplin.workspace.selectedNote())?.id!==note.id) throw new Error('The selected note changed.');
+        await insertCitation(snapshot, `\n\n{{include-note:${id}}}\n\n`);
+        send({type:'projectInserted',message:`Added ${child.title || 'note'} to the paper.`}); schedule();
+      } catch(error) { send({type:'projectError',message:error.message}); }
+    }
     if (message.type === 'reloadMetadata') { await loadAuthors(true); }
+    if (message.type === 'loadCitationTargets') { await loadCitationTargets(); }
+    if (message.type === 'insertCrossReference') {
+      try {
+        const view = citationView;
+        const note = await joplin.workspace.selectedNote();
+        if (!view || !note || note.id !== view.noteId || message.noteId !== view.noteId || message.revision !== view.revision) throw new Error('The selected note changed. Open Cite and choose the reference again.');
+        const target = view.targets[message.index];
+        if (!target || target.index !== message.index || target.kind !== message.kind) throw new Error('The reference list changed. Choose the target again.');
+        if (target.unnumbered) throw new Error('This heading is marked unnumbered and cannot be referenced by number.');
+        const snapshot = await citationSnapshot();
+        if (snapshot.text !== view.text) throw new Error('The note changed. Open Cite and choose the target again.');
+        let enableSections = false, docOptions;
+        if (target.kind === 'sec') {
+          const metadata = markdownMetadata(snapshot.text), styleId = await documentStyleFor(note.id);
+          docOptions = await documentOptionsFor(note.id);
+          const defaults = layoutDefaults(styleId, metadata), depth = Number(metadata?.secnumdepth ?? defaults.secnumdepth ?? 5);
+          const style = documentStyles[styleId], chapter = style.chapterStyle && (!metadata?.documentclass || metadata.documentclass === style.metadata.documentclass);
+          if (target.level > depth + (chapter ? 1 : 0)) throw new Error('This heading is deeper than the document’s section numbering depth.');
+          if (metadata?.numbersections === false) throw new Error('Section numbering is turned off in the note’s YAML. Change numbersections to true before inserting a section reference.');
+          enableSections = metadata?.numbersections == null && !(docOptions.sections === 'on' || (docOptions.sections === 'default' && defaults.numbersections));
+        }
+        if ((await joplin.workspace.selectedNote())?.id !== note.id) throw new Error('The selected note changed. Choose the reference again.');
+        const word = {sec:'Section',fig:'Figure',tab:'Table'}[target.kind];
+        await insertCitation(snapshot, `${word} \\@ref(${target.refId})`, target.change);
+        let warning = '';
+        if (enableSections) {
+          try { await joplin.data.userDataSet(1, note.id, DOCUMENT_OPTIONS_KEY, {...docOptions,sections:'on'}); await loadDocumentOptions(); }
+          catch (_) { warning = ' Enable section numbering in Document options.'; }
+        }
+        const hint = target.addedCaption ? ' A blank table caption was added; edit it to describe the table.' : target.addedFigureCaption ? ' A figure caption was added; edit it to describe the image.' : enableSections && !warning ? ' Section numbering was enabled.' : '';
+        citationView = null; await loadCitationTargets();
+        send({type:'citationInserted', message:`${word} reference inserted.${hint}${warning}`}); schedule();
+      } catch (error) { await loadCitationTargets(); send({type:'citationError', message:error.message}); }
+    }
     if (message.type === 'saveMetadata') {
       try {
         const note = await joplin.workspace.selectedNote();
@@ -291,12 +375,26 @@ joplin.plugins.register({ onStart: async function() {
     if (message.type === 'pickCitation' && !choosingCitation) {
       choosingCitation = true;
       send({type:'citationPicking'});
+      let citation = null;
       try {
-        const citation = await copyCitation(joplin.clipboard);
+        const note = await joplin.workspace.selectedNote();
+        if (!note) throw new Error('Select a note before adding a citation.');
+        let snapshot = null, editorError = '';
+        try { snapshot = await citationSnapshot(); } catch (error) { editorError = error.message; }
+        citation = await chooseCitation();
         if (!citation) send({type:'citationCancelled'});
-        else send({type:'citationCopied', citation});
-      } catch (error) { send({type:'citationError', message:error.message}); }
+        else {
+          if (!snapshot) throw new Error(editorError);
+          if ((await joplin.workspace.selectedNote())?.id !== note.id) throw new Error('The selected note changed.');
+          await insertCitation(snapshot, citation);
+          send({type:'citationInserted', message:'Zotero citation inserted.'}); schedule();
+        }
+      } catch (error) { send({type:'citationError', message:error.message, citation}); }
       finally { choosingCitation = false; }
+    }
+    if (message.type === 'copyCitationResult') {
+      try { if (typeof message.citation !== 'string' || !/^\[[^\r\n]*@[^\r\n]*\]$/.test(message.citation)) throw new Error('No citation to copy.'); await joplin.clipboard.writeText(message.citation); send({type:'citationCopied'}); }
+      catch (error) { send({type:'citationError', message:error.message}); }
     }
     if (message.type === 'copyFootnote') {
       try {
@@ -317,7 +415,7 @@ joplin.plugins.register({ onStart: async function() {
   await joplin.commands.register({ name: 'toggleJoplinScholar', label: 'Toggle Joplin Scholar', iconName: 'fas fa-graduation-cap scholar-toolbar-icon', execute: async () => { const visible = await joplin.views.panels.visible(panel); await joplin.views.panels.show(panel, !visible); if (!visible) schedule(true); } });
   await joplin.views.toolbarButtons.create('toggleJoplinScholarToolbar', 'toggleJoplinScholar', 'noteToolbar');
   await joplin.views.menuItems.create('toggleJoplinScholarMenu', 'toggleJoplinScholar', 'view');
-  await joplin.workspace.onNoteChange(() => { void loadAuthors(); void loadStyle(); void loadDocumentStyle(); void loadDocumentOptions(); schedule(); });
+  await joplin.workspace.onNoteChange(() => { void loadAuthors(); void loadStyle(); void loadDocumentStyle(); void loadDocumentOptions(); send({type:'citationTargetsDirty'}); schedule(); });
   await joplin.workspace.onNoteSelectionChange(() => { authorView = null; send({type:'metadataLoading'}); send({type:'paperChanged'}); void loadAuthors(); void loadStyle(); void loadDocumentStyle(); void loadDocumentOptions(); schedule(true, true); });
   await joplin.settings.onChange(() => { void loadDocumentStyle(); void loadDocumentOptions(); schedule(true); });
 }});

@@ -251,7 +251,7 @@ test('the bundled paper renders with embedded references regardless of global bi
       try {
         tex = await compile(note, data, {...base,...opts,citationStyle:'ieee'}, 'tex');
         const text = tex.output.toString();
-        for (const token of ['\\tableofcontents','\\listoffigures','\\listoftables','\\eqref{eq:mean}','\\label{eq:mean}','\\caption{A compact writing workflow','\\caption{A practical workflow','\\begin{CSLReferences}']) assert.ok(text.includes(token), `Missing ${token}`);
+        for (const token of ['\\tableofcontents','\\listoffigures','\\listoftables','\\eqref{eq:mean}','\\label{eq:mean}','\\ref{fig:workflow}','\\label{fig:workflow}','\\ref{tab:workflow}','\\label{tab:workflow}','\\ref{sec:writing}','\\label{sec:writing}','\\caption{A compact writing workflow','\\caption{A practical workflow','\\begin{CSLReferences}']) assert.ok(text.includes(token), `Missing ${token}`);
         assert.match(text, /\[1\]/);
         assert.doesNotMatch(text, /\[@(?:pandoc|joplin|zotero)\]/);
         assert.ok(text.includes(`assets/${id}.png`));
@@ -394,6 +394,33 @@ test('direct Zotero bibliography resolves only real citation keys', { skip: !pro
     await assert.rejects(compile({id:'three', title:'All', body:'---\nnocite: |\n  @*\n---\nText'}, {}, opts, 'tex'), /nocite: @\*/);
     assert.equal(calls.length, before, 'wildcard is rejected before requesting Zotero');
   } finally { await clean(tex); await clean(pdf); await clean(plain); await clean(directMetadata); await new Promise(resolve=>server.close(resolve)); }
+});
+
+test('combines embedded references with new Zotero citations', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
+  const http = require('node:http');
+  const calls = [];
+  const server = http.createServer((request, response) => {
+    let body = '';
+    request.on('data', chunk => body += chunk);
+    request.on('end', () => {
+      calls.push(JSON.parse(body));
+      response.writeHead(200, {'Content-Type':'application/json'});
+      response.end(JSON.stringify({jsonrpc:'2.0', id:1, result:'@book{external2020, author={Doe, John}, title={External Study}, year={2020}}'}));
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const opts = {pandoc:process.env.SCHOLAR_TEST_PANDOC, bibliographySource:'zotero', zoteroEndpoint:`http://127.0.0.1:${server.address().port}/better-bibtex/json-rpc`};
+  const note = {id:'mixed', title:'Mixed', body:'---\nbibliography: []\nreferences:\n  - id: embedded\n    type: book\n    title: Embedded Study\n    author:\n      - family: Smith\n        given: Jane\n    issued:\n      year: 2021\n---\n\nAn embedded citation [@embedded] and a new one [@external2020].\n\n# References'};
+  let result;
+  try {
+    result = await compile(note, {}, opts, 'tex');
+    const output = result.output.toString();
+    assert.match(output, /Embedded Study/);
+    assert.match(output, /External Study/);
+    assert.doesNotMatch(output, /external2020\?/);
+    assert.deepEqual(calls[0].params[0], ['external2020']);
+    assert.equal(calls.length, 1);
+  } finally { await clean(result); await new Promise(resolve => server.close(resolve)); }
 });
 
 test('applies bundled citation styles and gives R Markdown csl metadata precedence', { skip: !process.env.SCHOLAR_TEST_PANDOC }, async () => {
