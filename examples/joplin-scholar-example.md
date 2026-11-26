@@ -1,5 +1,9 @@
 ---
 title: "Writing a Paper with Joplin Scholar"
+keywords:
+  - academic writing
+  - Markdown
+  - reproducible papers
 numbersections: true
 author:
   - name: Alice Example
@@ -54,7 +58,7 @@ This document is a demonstration rather than a research study. Its source is int
 
 ## Title, authors, and abstract
 
-The YAML at the beginning of this note supplies its title and authors. Alice and Benjamin share an affiliation; Alice also has a second affiliation and a corresponding-author email. Open **Document metadata** to edit authors and their affiliations, select corresponding authors, or edit title, subtitle and date. **Full YAML** lets you change any other metadata field. Save to write your changes into the note. The YAML also accepts R Markdown author lists and optional author and affiliation URLs.
+The YAML at the beginning of this note supplies its title, authors, and keywords. Alice and Benjamin share an affiliation; Alice also has a second affiliation and a corresponding-author email. Open **Document metadata** to edit authors and their affiliations, select corresponding authors, or edit the title, subtitle, date, and keywords. Enter one keyword per line. Scholar saves the list in YAML and prints it near the abstract in the selected document style. **Full YAML** lets you change any other metadata field. The YAML also accepts R Markdown author lists and optional author and affiliation URLs.
 
 The **Abstract** heading above becomes a LaTeX abstract; it ends at the next heading or contents marker. It can include *emphasis*, **strong text**, mathematics, and citations. Use Joplin's Markdown editor for YAML and the specialised examples in this paper.[^editor]
 

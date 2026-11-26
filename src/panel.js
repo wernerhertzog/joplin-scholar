@@ -11,7 +11,7 @@ const addAuthorButton = document.querySelector('#add-author');
 const saveAuthorsButton = document.querySelector('#save-metadata');
 const reloadMetadataButton = document.querySelector('#reload-metadata');
 const metadataYaml = document.querySelector('#metadata-yaml');
-const metadataFields = Object.fromEntries(['title','subtitle','date'].map(key => [key, document.querySelector(`#metadata-${key}`)]));
+const metadataFields = Object.fromEntries(['title','subtitle','date','keywords'].map(key => [key, document.querySelector(`#metadata-${key}`)]));
 const footnoteText = document.querySelector('#footnote-text');
 const footnoteStatus = document.querySelector('#footnote-status');
 let authorNoteId = null, authorRevision = 0, metadataBase = null;
@@ -275,7 +275,7 @@ webviewApi.onMessage(event => {
     else {
       const draft = authorDrafts.get(authorNoteId); metadataBase = draft?.base || message.metadata; authorRevision = draft?.revision || 0;
       renderAuthors(draft?.authors || metadataBase.authors);
-      for (const [key,input] of Object.entries(metadataFields)) input.value = draft?.fields[key] ?? metadataBase.fields[key];
+      for (const [key,input] of Object.entries(metadataFields)) input.value = draft?.fields[key] ?? metadataBase.fields[key] ?? '';
       metadataYaml.value = draft?.yaml ?? metadataBase.yaml;
       setMetadataEnabled(true);
       authorsStatus.textContent = draft ? (draft.base.version !== message.metadata.version ? 'The note metadata changed. Copy your draft and reload before saving.' : 'Unsaved changes') : metadataBase.authorsError ? `Edit authors in Full YAML: ${metadataBase.authorsError}` : metadataBase.legacy ? 'Older authors are stored separately. Save metadata to add them to this note.' : metadataBase.complex.length ? `Edit ${metadataBase.complex.join(', ')} in Full YAML.` : 'Saved in the note’s YAML metadata.';

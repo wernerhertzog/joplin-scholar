@@ -62,6 +62,21 @@ test('preserves unmodified author YAML, supports arbitrary fields, and detects c
   assert.throws(()=>inspectMetadata('---\ntitle: Missing close\n'),/no closing/);
 });
 
+test('edits keywords as YAML entries without disturbing unrelated metadata', () => {
+  const body='---\nkeywords: [Tzotzil, "language, contact"]\ncustom: keep\n---\n\nPaper';
+  const state=inspectMetadata(body);
+  assert.equal(state.fields.keywords,'Tzotzil\nlanguage, contact');
+  const changed=updateMetadata(body,{version:state.version,fields:{keywords:'Tzotzil\nlanguage, contact\n  markets & trade  '}});
+  assert.deepEqual(markdownMetadata(changed).keywords,['Tzotzil','language, contact','markets & trade']);
+  assert.equal(markdownMetadata(changed).custom,'keep');
+  assert.ok(changed.endsWith('\nPaper'));
+  const next=inspectMetadata(changed);
+  assert.equal(markdownMetadata(updateMetadata(changed,{version:next.version,fields:{keywords:''}})).keywords,undefined);
+  assert.throws(()=>updateMetadata(body,{version:state.version,yaml:'keywords: [changed]\ncustom: keep\n',yamlChanged:true,fields:{keywords:'other'}}),/changed in both places/);
+  const complex=inspectMetadata('---\nkeywords: {foo: bar}\n---\nText');
+  assert.ok(complex.complex.includes('keywords'));
+});
+
 test('supports author removal, unusual author notes, and CRLF notes', () => {
   const body='---\r\nauthor:\r\n  - name: Alice\r\n    extra: keep\r\n---\r\n\r\nText\r\n';
   const state=inspectMetadata(body);

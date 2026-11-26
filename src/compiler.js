@@ -170,6 +170,8 @@ async function compile(note, data, options, format) {
   try {
     await stageNote(note, data, dir);
     const metadata = markdownMetadata(note.body);
+    const keywordValue = metadata?.keywords;
+    const hasKeywords = typeof keywordValue === 'string' ? !!keywordValue.trim() : Array.isArray(keywordValue) && keywordValue.some(value => typeof value === 'string' && value.trim());
     const style = documentStyles[documentStyleId(options.documentStyle) || 'default'];
     const documentOptions = normalizeDocumentOptions(options.documentOptions);
     const classMatches = !metadata?.documentclass || metadata.documentclass === style.metadata.documentclass;
@@ -194,7 +196,7 @@ async function compile(note, data, options, format) {
     if (documentOptions.sections !== 'default') layout.numbersections = documentOptions.sections === 'on';
     if (documentOptions.paperSize !== 'default') layout.papersize = documentOptions.paperSize;
     let parsed = null, document = null;
-    if (adapter || equations || crossReferences || mayContainLists(note.body)) parsed = await readPandocDocument(dir, options);
+    if (adapter || equations || crossReferences || mayContainLists(note.body) || (hasKeywords && !options.template)) parsed = await readPandocDocument(dir, options);
     const depth = parsed ? maximumListDepth(parsed.blocks || []) : 0;
     if (depth > MAX_LIST_DEPTH) throw new Error(`This note has ${depth} nested list or quote levels. Joplin Scholar supports up to ${MAX_LIST_DEPTH} levels.`);
     const compat = '\\usepackage{graphicx}\n\\makeatletter\n\\@ifundefined{KV@Gin@alt}{\\define@key{Gin}{alt}{}}{}\n\\makeatother\n';
@@ -203,10 +205,17 @@ async function compile(note, data, options, format) {
     const bookPreamble = classMatches && style.preamble === 'classicthesis' ? '\\providecolor{Maroon}{cmyk}{0,0.87,0.68,0.32}\n\\providecolor{RoyalBlue}{cmyk}{1,0.5,0,0}\n\\ifPDFTeX\\else\n\\let\\scholarSetMonoFont\\setmonofont\n\\renewcommand{\\setmonofont}[2][]{}\n\\fi\n\\usepackage[palatino=false,beramono=false]{classicthesis}\n\\ifPDFTeX\\else\\let\\setmonofont\\scholarSetMonoFont\\fi\n' : '';
     const lineNumbers = documentOptions.lineNumbers === 'on' ? '\\usepackage{lineno}\n\\AtBeginDocument{\\linenumbers}\n' : documentOptions.lineNumbers === 'off' ? '\\makeatletter\n\\AtBeginDocument{\\@ifundefined{nolinenumbers}{}{\\nolinenumbers}}\n\\makeatother\n' : '';
     await fs.writeFile(path.join(dir, 'scholar-compat.tex'), compat + bookPreamble + bookAbstract + lineNumbers + (depth > 4 ? deepListPreamble() : ''));
-    if (equations || crossReferences || adapter) {
+    if (equations || crossReferences || adapter || (hasKeywords && !options.template)) {
       document = equations ? transformEquations(parsed) : parsed;
       if (crossReferences) transformCrossReferences(document, {sectionsNumbered:metadata?.numbersections ?? layout.numbersections ?? false, sectionDepth:metadata?.secnumdepth ?? layout.secnumdepth ?? 5, chapterStyle:!!style.chapterStyle && classMatches});
-      if (adapter) extractAbstract(document);
+      if (adapter || (hasKeywords && !options.template && !document.meta?.abstract)) extractAbstract(document);
+      if (adapter === 'revtex' && hasKeywords) {
+        const configured = metadata?.classoption;
+        if (configured != null) {
+          const values = Array.isArray(configured) ? configured : [configured];
+          document.meta.classoption = {t:'MetaList', c:[...values.filter(value => value !== 'noshowkeys' && value !== 'showkeys'), 'showkeys'].map(value => ({t:'MetaString', c:String(value)}))};
+        } else layout.classoption = [...(layout.classoption || []), 'showkeys'];
+      }
       const classOptions = metadata?.classoption ?? style.metadata.classoption ?? [];
       const oneColumn = (Array.isArray(classOptions) ? classOptions : [classOptions]).includes('onecolumn');
       if (adapter === 'ieee' && !oneColumn) ieeeTables(document);
@@ -231,11 +240,11 @@ async function compile(note, data, options, format) {
         args.push('--include-after-body=scholar-affiliations.tex');
       }
     }
-    if (adapter) {
+    if (adapter || (hasKeywords && !options.template)) {
       let base;
       try { base = (await run(options.pandoc || 'pandoc', ['--print-default-template=latex'], {env:processEnvironment(), timeout:30000})).stdout; }
       catch (error) { throw new Error(`Could not load Pandoc's LaTeX template: ${error.message}`); }
-      const template = publisherTemplate(base, adapter);
+      const template = publisherTemplate(base, adapter || 'generic', hasKeywords);
       await fs.writeFile(path.join(dir, 'scholar-publisher.latex'), template, 'utf8');
       if (adapter === 'revtex' && base.includes('$common.latex()$')) {
         let common;

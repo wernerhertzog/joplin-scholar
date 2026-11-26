@@ -48,6 +48,12 @@ function inspectMetadata(body, legacyAuthors = [], noteTitle = '') {
     if (value == null || typeof value === 'string' || typeof value === 'number') fields[key] = value == null ? '' : String(value);
     else { fields[key] = ''; complex.push(key); }
   }
+  const keywords = metadata.keywords;
+  if (keywords == null) fields.keywords = '';
+  else if (typeof keywords === 'string') fields.keywords = keywords;
+  else if (Array.isArray(keywords) && keywords.every(item => typeof item === 'string')) fields.keywords = keywords.join('\n');
+  else { fields.keywords = ''; complex.push('keywords'); }
+  if (YAML.isAlias(doc.get('keywords', true)) && !complex.includes('keywords')) { fields.keywords = ''; complex.push('keywords'); }
   const titleFromNote = !metadata.title && !complex.includes('title');
   if (titleFromNote) fields.title = String(noteTitle || '');
   return {yaml:parts.yaml, version:headVersion(parts.head), fields, titleFromNote, complex, authors, legacy, authorsError};
@@ -96,6 +102,16 @@ function updateMetadata(body, {version, yaml, yamlChanged = false, fields = {}, 
   const doc = yamlChanged ? parseYaml(yaml) : original;
   const changedInYaml = key => yamlChanged && YAML.stringify(original.get(key)) !== YAML.stringify(doc.get(key));
   for (const [key, value] of Object.entries(fields)) {
+    if (key === 'keywords') {
+      if (typeof value !== 'string') throw new Error('Invalid metadata field: keywords.');
+      if (changedInYaml(key)) throw new Error('The keywords field was changed in both places. Save one edit at a time.');
+      const existing = doc.get(key, true);
+      const current = doc.toJS({maxAliasCount:100}).keywords;
+      if (YAML.isAlias(existing) || (current != null && typeof current !== 'string' && !(Array.isArray(current) && current.every(item => typeof item === 'string')))) throw new Error('Edit the keywords field in Full YAML.');
+      const keywords = value.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+      if (keywords.length) doc.set(key, keywords); else doc.delete(key);
+      continue;
+    }
     if (!SIMPLE_FIELDS.includes(key) || typeof value !== 'string') throw new Error(`Invalid metadata field: ${key}.`);
     if (changedInYaml(key)) throw new Error(`The ${key} field was changed in both places. Save one edit at a time.`);
     const existing = doc.get(key);

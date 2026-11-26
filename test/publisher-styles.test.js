@@ -23,7 +23,7 @@ test('publisher templates retain the example paper and export self-contained LaT
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const root = path.join(__dirname,'..');
   const resourceId = '1234567890abcdef1234567890abcdef';
-  const body = (await fs.readFile(path.join(root,'examples/joplin-scholar-example.md'),'utf8')).replace('(example-workflow.png)', `(:/${resourceId})`).replace(/^---\n/, '---\nsubtitle: A sample subtitle\n').replace('name: Benjamin Sample\n    affiliation: Example University', 'name: Benjamin Sample\n    affiliation: Example University\n    corresponding: true\n    email: ben@example.org');
+  const body = (await fs.readFile(path.join(root,'examples/joplin-scholar-example.md'),'utf8')).replace('(example-workflow.png)', `(:/${resourceId})`).replace(/^---\n/, '---\nsubtitle: A sample subtitle\n').replace('  - academic writing\n  - Markdown\n  - reproducible papers','  - sentinelalpha\n  - sentinelbeta').replace('name: Benjamin Sample\n    affiliation: Example University', 'name: Benjamin Sample\n    affiliation: Example University\n    corresponding: true\n    email: ben@example.org');
   const note = {id:'example', title:'Writing a Paper with Joplin Scholar', body};
   const data = {resourcePath:async()=>path.join(root,'examples/example-workflow.png')};
   const engine = process.env.SCHOLAR_TEST_ENGINE || '/Library/TeX/texbin/xelatex';
@@ -45,7 +45,7 @@ test('publisher templates retain the example paper and export self-contained LaT
       let text = '';
       for (let page = 1; page <= doc.numPages; page++) text += (await (await doc.getPage(page)).getTextContent()).items.map(item=>item.str).join(' ')+'\n';
       await doc.destroy();
-      for (const expected of ['A sample subtitle','Alice Example','Benjamin Sample','Example University','Centre for Open Scholarship','alice@example.org','ben@example.org','Joplin Scholar brings','A compact writing workflow','A practical workflow','References']) {
+      for (const expected of ['A sample subtitle','Alice Example','Benjamin Sample','Example University','Centre for Open Scholarship','alice@example.org','ben@example.org','Joplin Scholar brings','A compact writing workflow','A practical workflow','References','sentinelalpha','sentinelbeta']) {
         assert.ok(text.includes(expected), `${id} PDF is missing ${expected}`);
       }
       outdir = await fs.mkdtemp(path.join(os.tmpdir(),'scholar-style-export-'));

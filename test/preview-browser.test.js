@@ -60,11 +60,12 @@ test('PDF preview scales immediately, scrolls normally and renders nearby pages'
     await page.evaluate(() => window.onPluginMessage({type:'metadata',noteId:'n1',metadata:{version:'v1',yaml:'author: []\n',fields:{title:'Paper',subtitle:'',date:''},complex:[],authors:[{name:'Alice',affiliations:[],corresponding:true},{name:'Bob',affiliations:[],corresponding:true}]}}));
     assert.equal(await page.locator('.author-corresponding:checked').count(), 2);
     await page.locator('#metadata-title').fill('New title');
+    await page.locator('#metadata-keywords').fill('Tzotzil\nlanguage, contact');
     await page.locator('#metadata-panel summary').click();
     await page.locator('#metadata-yaml').fill('author: []\ncustom: value\n');
     await page.getByRole('button', {name:'Save metadata'}).click();
-    assert.ok(await page.evaluate(() => window.messages.some(m => m.type === 'saveMetadata' && m.fields.title === 'New title' && m.yaml.includes('custom: value'))));
-    await page.evaluate(() => window.onPluginMessage({type:'metadataSaved',noteId:'n1',revision:2}));
+    assert.ok(await page.evaluate(() => window.messages.some(m => m.type === 'saveMetadata' && m.fields.title === 'New title' && m.fields.keywords === 'Tzotzil\nlanguage, contact' && m.yaml.includes('custom: value'))));
+    await page.evaluate(() => window.onPluginMessage({type:'metadataSaved',noteId:'n1',revision:3}));
     await page.getByRole('button', {name:'Document metadata'}).click();
     await page.locator('#cite-menu summary').click();
     await page.waitForFunction(() => window.messages.some(message => message.type === 'loadCitationTargets'));

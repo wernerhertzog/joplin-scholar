@@ -73,7 +73,9 @@ Most publisher-specific classes and custom templates control their author layout
 
 ## Document metadata and authors
 
-Open **Document metadata** in the Scholar toolbar to edit the title, subtitle, date, authors and affiliations. The title field shows the Joplin note title by default; if you change it and save, the new document title is written to YAML without renaming the note. Clearing the document title returns to the note-title default. Use **Full YAML** to edit any other field, including keywords, abstracts, bibliographies, inline references and custom metadata. Click **Save metadata** to write the changes into the YAML at the start of the note. Existing unrelated metadata and comments are preserved where possible; inspect the YAML after complex edits. The default note title remains linked to the note and is not copied into YAML unless you edit it.
+Open **Document metadata** in the Scholar toolbar to edit the title, subtitle, date, keywords, authors and affiliations. Enter each keyword or phrase on its own line; saving writes a YAML list, and Scholar prints the keywords near the abstract using the selected style. The keyword list is also passed to Pandoc for PDF metadata; the ACM class may omit PDF keyword properties with some TeX distributions. If you already typed a separate keywords line in the note, remove it to avoid displaying both. A custom Pandoc template controls its own keyword placement and must explicitly render `keywords`.
+
+The title field shows the Joplin note title by default; if you change it and save, the new document title is written to YAML without renaming the note. Clearing the document title returns to the note-title default. Use **Full YAML** to edit other fields, including abstracts, bibliographies, inline references and custom metadata. Click **Save metadata** to write the changes into the YAML at the start of the note. Existing unrelated metadata and comments are preserved where possible; inspect the YAML after complex edits. The default note title remains linked to the note and is not copied into YAML unless you edit it.
 
 Add each author in order, with one affiliation per line. Shared affiliations receive the same number in the PDF. Use the arrows to change author order, select any corresponding authors, and enter their emails if desired. You can also specify author and affiliation URLs or author notes. The PDF and generated `.tex` use the selected document style's author commands. A custom Pandoc template must render the `author` variable, and journal-specific templates may require further adjustment.
 
@@ -82,6 +84,9 @@ The same data can be edited directly as Pandoc or R Markdown YAML at the very st
 ```yaml
 ---
 title: My paper
+keywords:
+  - language contact
+  - numeral change
 author:
   - name: Alice Smith
     affiliations:

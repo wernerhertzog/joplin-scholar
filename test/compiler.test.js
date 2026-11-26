@@ -268,6 +268,22 @@ test('the bundled paper renders with embedded references regardless of global bi
   } finally { await clean(pdf); }
 });
 
+test('renders YAML keywords after the abstract and also without an abstract', {skip:!process.env.SCHOLAR_TEST_PANDOC, timeout:60000}, async () => {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const options={pandoc:process.env.SCHOLAR_TEST_PANDOC,engine:process.env.SCHOLAR_TEST_ENGINE || '/Library/TeX/texbin/xelatex',documentStyle:'article'};
+  for (const contents of ['# Abstract\n\nA summary.\n\n# Introduction\n\nBody.', '# Introduction\n\nBody.']) {
+    let pdf;
+    try {
+      pdf=await compile({id:'keywords',title:'A paper',body:'---\nkeywords: [Tzotzil, "language, contact", "markets & trade"]\n---\n\n'+contents},{},options,'pdf');
+      const document=await pdfjs.getDocument({data:new Uint8Array(pdf.output),disableFontFace:true}).promise;
+      let text=''; for (let page=1;page<=document.numPages;page++) text+=(await (await document.getPage(page)).getTextContent()).items.map(item=>item.str).join(' ');
+      await document.destroy();
+      for (const term of ['Keywords','Tzotzil','language, contact','markets & trade']) assert.ok(text.includes(term),`Missing ${term}`);
+      if (contents.startsWith('# Abstract')) assert.ok(text.indexOf('A summary.') < text.indexOf('Keywords'));
+    } finally { await clean(pdf); }
+  }
+});
+
 test('exports into separate folders without overwriting, preserving TeX assets', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scholar-test-'));
   try {

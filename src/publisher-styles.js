@@ -95,7 +95,7 @@ function ieeeTables(document) {
   return document;
 }
 
-function publisherTemplate(base, style) {
+function publisherTemplate(base, style, showKeywords = false) {
   const titleStart = '$if(title)$\n\\title{';
   const titleIndex = base.indexOf(titleStart);
   const begin = base.indexOf('\\begin{document}', titleIndex);
@@ -112,7 +112,14 @@ function publisherTemplate(base, style) {
   }
   if (style === 'revtex') base = base.replace('$common.latex()$', '$scholar-common.latex()$');
   if (style === 'springer') base = base.replace('\\usepackage{xcolor}', '\\usepackage{xcolor}\n\\usepackage{etoolbox}');
-  if (style === 'ieee') return base;
+  const keywords = '$for(keywords)$$keywords$$sep$, $endfor$';
+  const standardKeywords = `$if(keywords)$\n\\par\\noindent\\textbf{Keywords:} ${keywords}\\par\n$endif$`;
+  const ieeeKeywords = `$if(keywords)$\n\\begin{IEEEkeywords}\n${keywords}\n\\end{IEEEkeywords}\n$endif$`;
+  if (style === 'ieee' || style === 'generic') {
+    if (!showKeywords) return base;
+    const visible = style === 'ieee' ? ieeeKeywords : standardKeywords;
+    return base.replace(marker, () => marker.replace('\\end{abstract}\n$endif$\n$endif$', () => `\\end{abstract}\n$endif$\n${visible}\n$endif$`));
+  }
   const end = base.indexOf('\\begin{document}', base.indexOf(titleStart));
   const before = base.slice(0, base.indexOf(titleStart));
   const after = base.slice(end);
@@ -120,17 +127,17 @@ function publisherTemplate(base, style) {
   const author = '$scholar-authors$';
   let head = '', front = '';
   if (style === 'apa7') {
-    head = `${title}\n\\shorttitle{$title$}\n${author}\n$if(abstract)$\\abstract{$abstract$}$endif$\n\\date{$date$}\n`;
-    front = '$if(title)$\\maketitle$endif$';
+    head = `${title}\n\\shorttitle{$title$}\n${author}\n$if(abstract)$\\abstract{$abstract$}$endif$\n${showKeywords ? `$if(keywords)$\\keywords{${keywords}}$endif$` : ''}\n\\date{$date$}\n`;
+    front = `$if(title)$\\maketitle$endif$${showKeywords ? `$if(abstract)$$else$${standardKeywords}$endif$` : ''}`;
   } else if (style === 'acm') {
-    head = `${title}\n${author}\n\\acmConference{}{}{}\n\\settopmatter{printacmref=false}\n\\date{$date$}\n`;
+    head = `${title}\n${author}\n${showKeywords ? `$if(keywords)$\\keywords{${keywords}}$endif$` : ''}\n\\acmConference{}{}{}\n\\settopmatter{printacmref=false}\n\\date{$date$}\n`;
     front = '$if(abstract)$\\begin{abstract}\n$abstract$\n\\end{abstract}$endif$\n$if(title)$\\maketitle$endif$';
   } else if (style === 'revtex') {
-    front = `${title}\n${author}\n$if(date)$\\date{$date$}$endif$\n$if(abstract)$\\begin{abstract}\n$abstract$\n\\end{abstract}$endif$\n$if(title)$\\maketitle$endif$`;
+    front = `${title}\n${author}\n$if(date)$\\date{$date$}$endif$\n$if(abstract)$\\begin{abstract}\n$abstract$\n\\end{abstract}$endif$\n${showKeywords ? `$if(keywords)$\\keywords{${keywords}}$endif$` : ''}\n$if(title)$\\maketitle$endif$`;
   } else if (style === 'elsevier') {
-    front = `\\begin{frontmatter}\n${title}\n${author}\n$if(abstract)$\\begin{abstract}\n$abstract$\n\\end{abstract}$endif$\n\\end{frontmatter}`;
+    front = `\\begin{frontmatter}\n${title}\n${author}\n$if(abstract)$\\begin{abstract}\n$abstract$\n\\end{abstract}$endif$\n${showKeywords ? '$if(keywords)$\\begin{keyword}$for(keywords)$$keywords$$sep$ \\sep $endfor$\\end{keyword}$endif$' : ''}\n\\end{frontmatter}`;
   } else if (style === 'springer') {
-    front = `\\newcommand{\\scholarCslBibItem}[2][]{\\item\\hypertarget{#2}{}}\n\\ifdefined\\CSLReferences\\AtBeginEnvironment{CSLReferences}{\\let\\bibitem\\scholarCslBibItem}\\fi\n${title}\n${author}\n$if(abstract)$\\abstract{$abstract$}$endif$\n$if(title)$\\maketitle$endif$`;
+    front = `\\newcommand{\\scholarCslBibItem}[2][]{\\item\\hypertarget{#2}{}}\n\\ifdefined\\CSLReferences\\AtBeginEnvironment{CSLReferences}{\\let\\bibitem\\scholarCslBibItem}\\fi\n${title}\n${author}\n$if(abstract)$\\abstract{$abstract$}$endif$\n${showKeywords ? `$if(keywords)$\\keywords{${keywords}}$endif$` : ''}\n$if(title)$\\maketitle$endif$`;
   } else return base;
   return before + head + after.replace(marker, () => front);
 }
